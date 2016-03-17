@@ -18,7 +18,6 @@ EXTRA_DIST = \
 	extras/package/win32/libvlc.dll.manifest \
 	extras/package/win32/change-contribs-directory.sh \
 	extras/package/win32/configure.sh \
-	extras/package/symbian/configure.sh \
 	extras/package/npapi.am \
 	extras/package/win32/NSIS/vlc.win32.nsi.in \
 	extras/package/win32/NSIS/spad.nsi.in \
@@ -142,20 +141,25 @@ EXTRA_DIST += \
 	extras/package/macosx/Resources/English.lproj/CoreDialogs.xib \
 	extras/package/macosx/Resources/English.lproj/DebugMessageVisualizer.xib \
 	extras/package/macosx/Resources/English.lproj/DetachedVideoWindow.xib \
-	extras/package/macosx/Resources/English.lproj/ErrorPanel.xib \
 	extras/package/macosx/Resources/English.lproj/FSPanel.xib \
 	extras/package/macosx/Resources/English.lproj/InfoPlist.strings.in \
+	extras/package/macosx/Resources/English.lproj/Help.xib \
 	extras/package/macosx/Resources/English.lproj/MainMenu.xib \
 	extras/package/macosx/Resources/English.lproj/MainWindow.xib \
 	extras/package/macosx/Resources/English.lproj/MediaInfo.xib \
 	extras/package/macosx/Resources/English.lproj/Open.xib \
 	extras/package/macosx/Resources/English.lproj/PlaylistAccessoryView.xib \
 	extras/package/macosx/Resources/English.lproj/PlaylistMenu.xib \
+	extras/package/macosx/Resources/English.lproj/PopupPanel.xib \
 	extras/package/macosx/Resources/English.lproj/Preferences.xib \
-	extras/package/macosx/Resources/English.lproj/SharedDialogs.xib \
+	extras/package/macosx/Resources/English.lproj/ResumeDialog.xib \
+	extras/package/macosx/Resources/English.lproj/SimplePreferences.xib \
+	extras/package/macosx/Resources/English.lproj/StreamOutput.xib \
 	extras/package/macosx/Resources/English.lproj/SyncTracks.xib \
+	extras/package/macosx/Resources/English.lproj/TextfieldPanel.xib \
+	extras/package/macosx/Resources/English.lproj/TimeSelectionPanel.xib \
 	extras/package/macosx/Resources/English.lproj/VideoEffects.xib \
-	extras/package/macosx/Resources/English.lproj/Wizard.xib \
+	extras/package/macosx/Resources/English.lproj/VLCStatusBarIconMainMenu.xib \
 	extras/package/macosx/Resources/fspanel/fs_background.png \
 	extras/package/macosx/Resources/fspanel/fs_background@2x.png \
 	extras/package/macosx/Resources/fspanel/fs_exit_fullscreen.png \
@@ -536,24 +540,6 @@ EXTRA_DIST += \
 	extras/package/macosx/Resources/mainwindow_dark/titlebar/lion/lion-window-zoom-over@2x.png \
 	extras/package/macosx/Resources/mainwindow_dark/titlebar/lion/lion-window-zoom.png \
 	extras/package/macosx/Resources/mainwindow_dark/titlebar/lion/lion-window-zoom@2x.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-close-graphite.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-close-on-graphite.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-close-on.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-close-over-graphite.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-close-over.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-close.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-minimize-graphite.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-minimize-on-graphite.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-minimize-on.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-minimize-over-graphite.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-minimize-over.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-minimize.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-zoom-graphite.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-zoom-on-graphite.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-zoom-on.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-zoom-over-graphite.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-zoom-over.png \
-	extras/package/macosx/Resources/mainwindow_dark/titlebar/snowleo/snowleo-window-zoom.png \
 	extras/package/macosx/Resources/mainwindow_dark/titlebar/yosemite/yosemite-window-close-graphite.png \
 	extras/package/macosx/Resources/mainwindow_dark/titlebar/yosemite/yosemite-window-close-graphite@2x.png \
 	extras/package/macosx/Resources/mainwindow_dark/titlebar/yosemite/yosemite-window-close-on-graphite.png \
@@ -869,6 +855,14 @@ EXTRA_DIST += \
 	extras/package/macosx/Resources/sidebar-icons_yosemite/ys-sidebar-playlist@2x.png \
 	extras/package/macosx/Resources/sidebar-icons_yosemite/ys-sidebar-podcast.png \
 	extras/package/macosx/Resources/sidebar-icons_yosemite/ys-sidebar-podcast@2x.png \
+	extras/package/macosx/Resources/vlcmenubaricon/pauseIcon.png \
+	extras/package/macosx/Resources/vlcmenubaricon/pauseIcon@2x.png \
+	extras/package/macosx/Resources/vlcmenubaricon/playIcon.png \
+	extras/package/macosx/Resources/vlcmenubaricon/playIcon@2x.png \
+	extras/package/macosx/Resources/vlcmenubaricon/statusBarIcon.png \
+	extras/package/macosx/Resources/vlcmenubaricon/statusBarIcon@2x.png \
+	extras/package/macosx/Resources/vlcmenubaricon/stopIcon.png \
+	extras/package/macosx/Resources/vlcmenubaricon/stopIcon@2x.png \
 	extras/package/macosx/Resources/vlc.scriptSuite \
 	extras/package/macosx/Resources/vlc.scriptTerminology \
 	extras/package/macosx/ub.sh \
@@ -962,7 +956,7 @@ svlc: make-alias Makefile
 	$(AM_V_GEN)$(MKALIAS) skins2
 
 qvlc: make-alias Makefile
-	$(AM_V_GEN)$(MKALIAS) qt4
+	$(AM_V_GEN)$(MKALIAS) qt
 
 nvlc: make-alias Makefile
 	$(AM_V_GEN)$(MKALIAS) ncurses
@@ -972,7 +966,11 @@ noinst_SCRIPTS = vlc$(EXEEXT)
 endif
 
 vlc$(EXEEXT):
+if HAVE_DARWIN
+	$(AM_V_GEN)$(LN_S) -f bin/vlc-osx-static vlc
+else
 	$(AM_V_GEN)$(LN_S) -f bin/vlc-static$(EXEEXT) vlc$(EXEEXT)
+endif
 
 TESTS = test/run_vlc.sh
 dist_noinst_SCRIPTS += test/run_vlc.sh
@@ -992,6 +990,29 @@ install-exec-hook:
 
 uninstall-hook:
 	rm -f -- "$(DESTDIR)$(vlclibdir)/plugins/plugins.dat"
+
+###############################################################################
+# Test coverage
+###############################################################################
+
+lcov-raw.out:
+	$(MAKE) $(AM_MAKEFLAGS) all
+	lcov -z -d .
+	$(MAKE) $(AM_MAKEFLAGS) check
+	lcov -c -d . -o lcov-raw.out
+
+lcov.out: lcov-raw.out
+	lcov -r lcov-raw.out -o lcov.out \
+		'*test*' 'contrib/*' '/usr/include/*'
+
+lcov: lcov.out
+	rm -Rf lcov lcov.tmp
+	prefix="$$(cd "$(top_srcdir)" && pwd)" ; \
+	genhtml -p "$$prefix" -o lcov.tmp lcov.out >/dev/null
+	mv lcov.tmp lcov
+
+.PHONY: lcov-raw.out
+
 
 ###############################################################################
 # PO translation files update

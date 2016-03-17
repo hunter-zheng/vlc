@@ -101,6 +101,9 @@ static char *FromACP( const char *str )
 
 #define IGNORE_ES NAV_ES
 #define READ_LENGTH (25 * 1000) // 25ms
+#define READ_LENGTH_NONINTERLEAVED (CLOCK_FREQ * 3 / 2)
+
+//#define AVI_DEBUG
 
 typedef struct
 {
@@ -145,7 +148,7 @@ typedef struct
     unsigned int    i_cat; /* AUDIO_ES, VIDEO_ES */
     vlc_fourcc_t    i_codec;
 
-    int             i_rate;
+    unsigned int    i_rate;
     int             i_scale;
     unsigned int    i_samplesize;
 
@@ -178,6 +181,7 @@ struct demux_sys_t
     bool  b_seekable;
     bool  b_fastseekable;
     bool  b_indexloaded; /* if we read indexes from end of file before starting */
+    mtime_t i_read_increment;
     uint32_t i_avih_flags;
     avi_chunk_t ck_root;
 
@@ -374,6 +378,12 @@ static int Open( vlc_object_t * p_this )
 
     p_sys->b_interleaved |= (p_avih->i_flags & AVIF_ISINTERLEAVED);
 
+    if( p_sys->b_interleaved && !p_sys->b_fastseekable )
+        p_sys->i_read_increment = READ_LENGTH;
+    else
+        p_sys->i_read_increment = READ_LENGTH_NONINTERLEAVED;
+    /* non seekable and non interleaved case ? well... */
+
     AVI_MetaLoad( p_demux, p_riff, p_avih );
     p_sys->i_avih_flags = p_avih->i_flags;
 
@@ -449,6 +459,14 @@ static int Open( vlc_object_t * p_this )
                 if ( tk->i_codec == VLC_CODEC_MP4A )
                 {
                     tk->i_samplesize = 0; /* ADTS/AAC VBR */
+                }
+
+                /* Fix broken scale/rate */
+                if ( tk->i_codec == VLC_CODEC_ADPCM_IMA_WAV &&
+                     tk->i_samplesize && tk->i_samplesize > tk->i_rate )
+                {
+                    tk->i_scale = 1017;
+                    tk->i_rate = p_auds->p_wf->nSamplesPerSec;
                 }
 
                 es_format_Init( &fmt, AUDIO_ES, tk->i_codec );
@@ -582,6 +600,8 @@ static int Open( vlc_object_t * p_this )
 
                 fmt.video.i_width  = p_vids->p_bih->biWidth;
                 fmt.video.i_height = p_vids->p_bih->biHeight;
+                fmt.video.i_visible_width = fmt.video.i_width;
+                fmt.video.i_visible_height = fmt.video.i_height;
                 fmt.video.i_bits_per_pixel = p_vids->p_bih->biBitCount;
                 fmt.video.i_frame_rate = tk->i_rate;
                 fmt.video.i_frame_rate_base = tk->i_scale;
@@ -660,6 +680,8 @@ static int Open( vlc_object_t * p_this )
                 es_format_Init( &fmt, VIDEO_ES, p_strh->i_handler );
                 fmt.video.i_width  = p_avih->i_width;
                 fmt.video.i_height = p_avih->i_height;
+                fmt.video.i_visible_width = fmt.video.i_width;
+                fmt.video.i_visible_height = fmt.video.i_height;
                 break;
 
             case( AVIFOURCC_mids):
@@ -691,13 +713,16 @@ aviindex:
         {
             AVI_IndexCreate( p_demux );
         }
+        else if( p_sys->b_seekable )
+        {
+            AVI_IndexLoad( p_demux );
+        }
         else
         {
             msg_Warn( p_demux, "cannot create index (unseekable stream)" );
-            AVI_IndexLoad( p_demux );
         }
     }
-    else
+    else if( p_sys->b_seekable )
     {
         AVI_IndexLoad( p_demux );
     }
@@ -728,22 +753,28 @@ aviindex:
             }
             if( i_do_index == 0 )
             {
-                switch( dialog_Question( p_demux, _("Broken or missing AVI Index") ,
-                   _( "Because this AVI file index is broken or missing, "
-                      "seeking will not work correctly.\n"
-                      "VLC won't repair your file but can temporary fix this "
-                      "problem by building an index in memory.\n"
-                      "This step might take a long time on a large file.\n"
-                      "What do you want to do?" ),
-                      _( "Build index then play" ), _( "Play as is" ), _( "Do not play") ) )
+                const char *psz_msg = _(
+                    "Because this AVI file index is broken or missing, "
+                    "seeking will not work correctly.\n"
+                    "VLC won't repair your file but can temporary fix this "
+                    "problem by building an index in memory.\n"
+                    "This step might take a long time on a large file.\n"
+                    "What do you want to do?");
+                switch( vlc_dialog_wait_question( p_demux,
+                                                  VLC_DIALOG_QUESTION_NORMAL,
+                                                  _("Do not play"),
+                                                  _("Build index then play"),
+                                                  _("Play as is"),
+                                                  _("Broken or missing AVI Index"),
+                                                  "%s", psz_msg ) )
                 {
+                    case 0:
+                        b_aborted = true;
+                        goto error;
                     case 1:
                         b_index = true;
                         msg_Dbg( p_demux, "Fixing AVI index" );
                         goto aviindex;
-                    case 3:
-                        b_aborted = true;
-                        goto error;
                 }
             }
             else
@@ -776,7 +807,7 @@ aviindex:
         p_auds = AVI_ChunkFind( p_strl, AVIFOURCC_strf, 0 );
 
         if( p_auds->p_wf->wFormatTag != WAVE_FORMAT_PCM &&
-            (unsigned int)tk->i_rate == p_auds->p_wf->nSamplesPerSec )
+            tk->i_rate == p_auds->p_wf->nSamplesPerSec )
         {
             int64_t i_track_length =
                 tk->idx.p_entry[tk->idx.i_size-1].i_length +
@@ -863,11 +894,8 @@ block_t * ReadFrame( demux_t *p_demux, const avi_track_t *tk,
     }
 
     /* skip header */
-    if( tk->i_idxposb == 0 )
-    {
-        p_frame->p_buffer += i_header;
-        p_frame->i_buffer -= i_header;
-    }
+    p_frame->p_buffer += i_header;
+    p_frame->i_buffer -= i_header;
 
     if ( !tk->i_width_bytes )
         return p_frame;
@@ -989,20 +1017,20 @@ static int Demux_Seekable( demux_t *p_demux )
     {
         int64_t i_length = p_sys->i_length * CLOCK_FREQ;
 
-        p_sys->i_time += READ_LENGTH;
+        p_sys->i_time += p_sys->i_read_increment;
         if( i_length > 0 )
         {
             if( p_sys->i_time >= i_length )
-                return 0;
-            return 1;
+                return VLC_DEMUXER_EOF;
+            return VLC_DEMUXER_SUCCESS;
         }
         msg_Warn( p_demux, "no track selected, exiting..." );
-        return 0;
+        return VLC_DEMUXER_EOF;
     }
 
     /* wait for the good time */
     es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + p_sys->i_time );
-    p_sys->i_time += READ_LENGTH;
+    p_sys->i_time += p_sys->i_read_increment;
 
     /* init toread */
     for( i_track = 0; i_track < p_sys->i_track; i_track++ )
@@ -1050,8 +1078,8 @@ static int Demux_Seekable( demux_t *p_demux )
         for( i = 0, b_done = true, i_pos = -1; i < p_sys->i_track; i++ )
         {
             if( !toread[i].b_ok ||
-                AVI_GetDPTS( p_sys->track[i],
-                             toread[i].i_toread ) <= -READ_LENGTH )
+                ( p_sys->b_fastseekable && p_sys->b_interleaved &&
+                  AVI_GetDPTS( p_sys->track[i], toread[i].i_toread ) <= -p_sys->i_read_increment ) )
             {
                 continue;
             }
@@ -1075,10 +1103,10 @@ static int Demux_Seekable( demux_t *p_demux )
             for( i = 0; i < p_sys->i_track; i++ )
             {
                 if( toread[i].b_ok )
-                    return 1;
+                    return VLC_DEMUXER_SUCCESS;
             }
             msg_Warn( p_demux, "all tracks have failed, exiting..." );
-            return 0;
+            return VLC_DEMUXER_EOF;
         }
 
         if( i_pos == -1 )
@@ -1148,7 +1176,7 @@ static int Demux_Seekable( demux_t *p_demux )
                     avi_index_Append( &tk->idx, &p_sys->i_movi_lastchunk_pos, &index );
 
                     /* do we will read this data ? */
-                    if( AVI_GetDPTS( tk, toread[i_track].i_toread ) > -READ_LENGTH )
+                    if( AVI_GetDPTS( tk, toread[i_track].i_toread ) > -p_sys->i_read_increment )
                     {
                         break;
                     }
@@ -1167,7 +1195,14 @@ static int Demux_Seekable( demux_t *p_demux )
         }
         else
         {
-            stream_Seek( p_demux->s, i_pos );
+            if( !p_sys->b_fastseekable && (i_pos > stream_Tell( p_demux->s )) )
+            {
+                stream_Read( p_demux->s, NULL, i_pos - stream_Tell( p_demux->s ) );
+            }
+            else
+            {
+                stream_Seek( p_demux->s, i_pos );
+            }
         }
 
         /* Set the track to use */
@@ -1310,20 +1345,31 @@ static int Demux_UnSeekable( demux_t *p_demux )
             b |= b_extra;
         }
 
-        if( b && tk->i_cat == VIDEO_ES )
+        if( b )
         {
-            p_stream_master = tk;
-        }
-        else if( b )
-        {
-            p_stream_master = tk;
+            if( tk->i_cat == VIDEO_ES )
+            {
+                p_stream_master = tk;
+                break;
+            }
+            else if( !p_stream_master )
+            {
+                p_stream_master = tk;
+            }
         }
     }
 
     if( !p_stream_master )
     {
-        msg_Warn( p_demux, "no more stream selected" );
-        return( 0 );
+        if( p_sys->i_track )
+        {
+            p_stream_master = p_sys->track[0];
+        }
+        else
+        {
+            msg_Warn( p_demux, "no more stream selected" );
+            return VLC_DEMUXER_EOF;
+        }
     }
 
     p_sys->i_time = AVI_GetPTS( p_stream_master );
@@ -1336,7 +1382,7 @@ static int Demux_UnSeekable( demux_t *p_demux )
 
         if( AVI_PacketGetHeader( p_demux, &avi_pk ) )
         {
-            return( 0 );
+            return VLC_DEMUXER_EOF;
         }
 
         if( avi_pk.i_stream >= p_sys->i_track ||
@@ -1357,28 +1403,29 @@ static int Demux_UnSeekable( demux_t *p_demux )
                     {
                         return( !AVI_PacketNext( p_demux ) ? 1 : 0 );
                     }
-                    return( 0 );    /* eof */
+                    return VLC_DEMUXER_EOF;
                 default:
                     msg_Warn( p_demux,
-                              "seems to have lost position, resync" );
+                              "seems to have lost position @%ld, resync", stream_Tell(p_demux->s) );
                     if( AVI_PacketSearch( p_demux ) )
                     {
                         msg_Err( p_demux, "resync failed" );
-                        return( -1 );
+                        return VLC_DEMUXER_EGENERIC;
                     }
             }
         }
         else
         {
             /* check for time */
-            if( llabs( AVI_GetPTS( p_stream ) -
-                        AVI_GetPTS( p_stream_master ) )< 600*1000 )
+            if( p_stream == p_stream_master ||
+                llabs( AVI_GetPTS( p_stream ) -
+                        AVI_GetPTS( p_stream_master ) )< 2 * CLOCK_FREQ )
             {
                 /* load it and send to decoder */
                 block_t *p_frame = ReadFrame( p_demux, p_stream, 8, avi_pk.i_size + 8 ) ;
                 if( p_frame == NULL )
                 {
-                    return( -1 );
+                    return VLC_DEMUXER_EGENERIC;
                 }
                 p_frame->i_pts = VLC_TS_0 + AVI_GetPTS( p_stream );
 
@@ -1398,7 +1445,7 @@ static int Demux_UnSeekable( demux_t *p_demux )
             {
                 if( AVI_PacketNext( p_demux ) )
                 {
-                    return( 0 );
+                    return VLC_DEMUXER_EOF;
                 }
             }
 
@@ -1420,7 +1467,7 @@ static int Demux_UnSeekable( demux_t *p_demux )
 #undef p_stream
     }
 
-    return( 1 );
+    return VLC_DEMUXER_SUCCESS;
 }
 
 /*****************************************************************************
@@ -1583,6 +1630,10 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
     switch( i_query )
     {
+        case DEMUX_CAN_SEEK:
+            *va_arg( args, bool * ) = p_sys->b_seekable;
+            return VLC_SUCCESS;
+
         case DEMUX_GET_POSITION:
             pf = (double*)va_arg( args, double * );
             *pf = ControlGetPosition( p_demux );
@@ -2373,6 +2424,27 @@ static int AVI_IndexLoad_idx1( demux_t *p_demux,
             avi_index_Append( &p_index[i_stream], pi_last_offset, &index );
         }
     }
+
+#ifdef AVI_DEBUG
+    for( unsigned i_index = 0; i_index< p_idx1->i_entry_count && i_index < p_sys->i_track; i_index++ )
+    {
+        for( unsigned i = 0; i < p_index[i_index].i_size; i++ )
+        {
+            mtime_t i_length;
+            if( p_sys->track[i_index]->i_samplesize )
+            {
+                i_length = AVI_GetDPTS( p_sys->track[i_index],
+                                        p_index[i_index].p_entry[i].i_lengthtotal );
+            }
+            else
+            {
+                i_length = AVI_GetDPTS( p_sys->track[i_index], i );
+            }
+            msg_Dbg( p_demux, "index stream %d @%ld time %ld", i_index,
+                     p_index[i_index].p_entry[i].i_pos, i_length );
+        }
+    }
+#endif
     return VLC_SUCCESS;
 }
 
@@ -2543,7 +2615,7 @@ static void AVI_IndexCreate( demux_t *p_demux )
     off_t i_movi_end;
 
     mtime_t i_dialog_update;
-    dialog_progress_bar_t *p_dialog = NULL;
+    vlc_dialog_id *p_dialog_id = NULL;
 
     p_riff = AVI_ChunkFind( &p_sys->ck_root, AVIFOURCC_RIFF, 0);
     p_movi = AVI_ChunkFind( p_riff, AVIFOURCC_movi, 0);
@@ -2567,23 +2639,27 @@ static void AVI_IndexCreate( demux_t *p_demux )
     /* Only show dialog if AVI is > 10MB */
     i_dialog_update = mdate();
     if( stream_Size( p_demux->s ) > 10000000 )
-        p_dialog = dialog_ProgressCreate( p_demux, _("Fixing AVI Index..."),
-                                       NULL, _("Cancel") );
+    {
+        p_dialog_id =
+            vlc_dialog_display_progress( p_demux, false, 0.0, _("Cancel"),
+                                         _("Broken or missing AVI Index"),
+                                         _("Fixing AVI Index...") );
+    }
 
     for( ;; )
     {
         avi_packet_t pk;
 
         /* Don't update/check dialog too often */
-        if( p_dialog && mdate() - i_dialog_update > 100000 )
+        if( p_dialog_id != NULL && mdate() - i_dialog_update > 100000 )
         {
-            if( dialog_ProgressCancelled( p_dialog ) )
+            if( vlc_dialog_is_cancelled( p_demux, p_dialog_id ) )
                 break;
 
             double f_current = stream_Tell( p_demux->s );
             double f_size    = stream_Size( p_demux->s );
             double f_pos     = f_current / f_size;
-            dialog_ProgressSet( p_dialog, NULL, f_pos );
+            vlc_dialog_update_progress( p_demux, p_dialog_id, f_pos );
 
             i_dialog_update = mdate();
         }
@@ -2648,8 +2724,8 @@ static void AVI_IndexCreate( demux_t *p_demux )
     }
 
 print_stat:
-    if( p_dialog != NULL )
-        dialog_ProgressDestroy( p_dialog );
+    if( p_dialog_id != NULL )
+        vlc_dialog_release( p_demux, p_dialog_id );
 
     for( i_stream = 0; i_stream < p_sys->i_track; i_stream++ )
     {

@@ -26,12 +26,12 @@
 # define __LIBVLC_PLAYLIST_INTERNAL_H 1
 
 /**
- *  \file
- *  This file contain internal structures and function prototypes related
- *  to the playlist in vlc
+ * \defgroup playlist_internals VLC playlist internals
+ * \ingroup playlist
  *
- * \defgroup vlc_playlist Playlist
  * @{
+ * \file
+ * VLC playlist internal interface
  */
 
 #include "input/input_interface.h"
@@ -143,10 +143,6 @@ int playlist_DeleteItem( playlist_t * p_playlist, playlist_item_t *, bool);
 void ResetCurrentlyPlaying( playlist_t *p_playlist, playlist_item_t *p_cur );
 void ResyncCurrentIndex( playlist_t *p_playlist, playlist_item_t *p_cur );
 
-/**
- * @}
- */
-
 #define PLAYLIST_DEBUG 1
 //#undef PLAYLIST_DEBUG2
 
@@ -176,4 +172,5 @@ static inline void pl_unlock_if( playlist_t * p_playlist, bool cond )
     if( cond ) PL_UNLOCK;
 }
 
+/** @} */
 #endif /* !__LIBVLC_PLAYLIST_INTERNAL_H */

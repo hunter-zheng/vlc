@@ -35,6 +35,7 @@
 #endif
 
 #include <errno.h>
+#include <limits.h>
 
 #include <vlc_common.h>
 #include <vlc_codec.h>
@@ -134,7 +135,11 @@ static picture_t *ImageRead( image_handler_t *p_image, block_t *p_block,
     if( !p_image->p_dec )
     {
         p_image->p_dec = CreateDecoder( p_image->p_parent, p_fmt_in );
-        if( !p_image->p_dec ) return NULL;
+        if( !p_image->p_dec )
+        {
+            block_Release(p_block);
+            return NULL;
+        }
     }
 
     p_block->i_pts = p_block->i_dts = mdate();
@@ -228,7 +233,7 @@ static picture_t *ImageReadUrl( image_handler_t *p_image, const char *psz_url,
     block_t *p_block;
     picture_t *p_pic;
     stream_t *p_stream = NULL;
-    int i_size;
+    uint64_t i_size;
 
     p_stream = stream_UrlNew( p_image->p_parent, psz_url );
 
@@ -239,19 +244,24 @@ static picture_t *ImageReadUrl( image_handler_t *p_image, const char *psz_url,
         return NULL;
     }
 
-    i_size = stream_Size( p_stream );
+    if( stream_GetSize( p_stream, &i_size ) || i_size > SSIZE_MAX )
+    {
+        msg_Dbg( p_image->p_parent, "could not read %s", psz_url );
+        goto error;
+    }
 
-    p_block = block_Alloc( i_size );
-
-    stream_Read( p_stream, p_block->p_buffer, i_size );
+    p_block = stream_Block( p_stream, i_size );
+    if( p_block == NULL )
+        goto error;
 
     if( !p_fmt_in->i_chroma )
     {
-        char *psz_mime = NULL;
-        stream_Control( p_stream, STREAM_GET_CONTENT_TYPE, &psz_mime );
-        if( psz_mime )
+        char *psz_mime = stream_ContentType( p_stream );
+        if( psz_mime != NULL )
+        {
             p_fmt_in->i_chroma = image_Mime2Fourcc( psz_mime );
-        free( psz_mime );
+            free( psz_mime );
+        }
     }
     stream_Delete( p_stream );
 
@@ -264,6 +274,9 @@ static picture_t *ImageReadUrl( image_handler_t *p_image, const char *psz_url,
     p_pic = ImageRead( p_image, p_block, p_fmt_in, p_fmt_out );
 
     return p_pic;
+error:
+    stream_Delete( p_stream );
+    return NULL;
 }
 
 /**
@@ -610,7 +623,7 @@ static decoder_t *CreateDecoder( vlc_object_t *p_this, video_format_t *fmt )
     es_format_Init( &p_dec->fmt_in, VIDEO_ES, fmt->i_chroma );
     es_format_Init( &p_dec->fmt_out, VIDEO_ES, 0 );
     p_dec->fmt_in.video = *fmt;
-    p_dec->b_pace_control = true;
+    p_dec->b_frame_drop_allowed = false;
 
     p_dec->pf_vout_format_update = video_update_format;
     p_dec->pf_vout_buffer_new = video_new_buffer;
@@ -658,7 +671,9 @@ static encoder_t *CreateEncoder( vlc_object_t *p_this, video_format_t *fmt_in,
     p_enc->fmt_in.video = *fmt_in;
 
     if( p_enc->fmt_in.video.i_visible_width == 0 ||
-        p_enc->fmt_in.video.i_visible_height == 0 )
+        p_enc->fmt_in.video.i_visible_height == 0 ||
+        p_enc->fmt_out.video.i_visible_width == 0 ||
+        p_enc->fmt_out.video.i_visible_height == 0 )
     {
         if( fmt_out->i_width > 0 && fmt_out->i_height > 0 )
         {
@@ -677,17 +692,16 @@ static encoder_t *CreateEncoder( vlc_object_t *p_this, video_format_t *fmt_in,
                 p_enc->fmt_in.video.i_visible_height = fmt_out->i_height;
             }
         }
-        else if( fmt_out->i_sar_num && fmt_out->i_sar_den &&
-                 fmt_out->i_sar_num * fmt_in->i_sar_den !=
-                 fmt_out->i_sar_den * fmt_in->i_sar_num )
-        {
-            p_enc->fmt_in.video.i_width =
-                fmt_in->i_sar_num * (int64_t)fmt_out->i_sar_den * fmt_in->i_width /
-                fmt_in->i_sar_den / fmt_out->i_sar_num;
-            p_enc->fmt_in.video.i_visible_width =
-                fmt_in->i_sar_num * (int64_t)fmt_out->i_sar_den *
-                fmt_in->i_visible_width / fmt_in->i_sar_den / fmt_out->i_sar_num;
-        }
+    } else if( fmt_out->i_sar_num && fmt_out->i_sar_den &&
+               fmt_out->i_sar_num * fmt_in->i_sar_den !=
+               fmt_out->i_sar_den * fmt_in->i_sar_num )
+    {
+        p_enc->fmt_in.video.i_width =
+            fmt_in->i_sar_num * (int64_t)fmt_out->i_sar_den * fmt_in->i_width /
+            fmt_in->i_sar_den / fmt_out->i_sar_num;
+        p_enc->fmt_in.video.i_visible_width =
+            fmt_in->i_sar_num * (int64_t)fmt_out->i_sar_den *
+            fmt_in->i_visible_width / fmt_in->i_sar_den / fmt_out->i_sar_num;
     }
 
     p_enc->fmt_in.video.i_frame_rate = 25;

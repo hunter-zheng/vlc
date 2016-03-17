@@ -69,6 +69,9 @@ endif
 ifneq ($(findstring $(origin STRIP),undefined default),)
 STRIP := strip
 endif
+ifneq ($(findstring $(origin WIDL),undefined default),)
+WIDL := widl
+endif
 else
 ifneq ($(findstring $(origin CC),undefined default),)
 CC := $(HOST)-gcc
@@ -88,6 +91,9 @@ endif
 ifneq ($(findstring $(origin STRIP),undefined default),)
 STRIP := $(HOST)-strip
 endif
+ifneq ($(findstring $(origin WIDL),undefined default),)
+WIDL := $(HOST)-widl
+endif
 endif
 
 ifdef HAVE_ANDROID
@@ -96,7 +102,7 @@ CXX := $(HOST)-g++ --sysroot=$(ANDROID_NDK)/platforms/$(ANDROID_API)/arch-$(PLAT
 endif
 
 ifdef HAVE_MACOSX
-MIN_OSX_VERSION=10.6
+MIN_OSX_VERSION=10.7
 CC=xcrun cc
 CXX=xcrun c++
 AR=xcrun ar
@@ -104,6 +110,7 @@ LD=xcrun ld
 STRIP=xcrun strip
 RANLIB=xcrun ranlib
 EXTRA_CFLAGS += -isysroot $(MACOSX_SDK) -mmacosx-version-min=$(MIN_OSX_VERSION) -DMACOSX_DEPLOYMENT_TARGET=$(MIN_OSX_VERSION)
+EXTRA_CXXFLAGS += -stdlib=libc++
 EXTRA_LDFLAGS += -Wl,-syslibroot,$(MACOSX_SDK) -mmacosx-version-min=$(MIN_OSX_VERSION) -isysroot $(MACOSX_SDK) -DMACOSX_DEPLOYMENT_TARGET=$(MIN_OSX_VERSION)
 ifeq ($(ARCH),x86_64)
 EXTRA_CFLAGS += -m64
@@ -163,7 +170,7 @@ cppcheck = $(shell $(CC) $(CFLAGS) -E -dM - < /dev/null | grep -E $(1))
 EXTRA_CFLAGS += -I$(PREFIX)/include
 CPPFLAGS := $(CPPFLAGS) $(EXTRA_CFLAGS)
 CFLAGS := $(CFLAGS) $(EXTRA_CFLAGS) -g
-CXXFLAGS := $(CXXFLAGS) $(EXTRA_CFLAGS) -g
+CXXFLAGS := $(CXXFLAGS) $(EXTRA_CFLAGS) $(EXTRA_CXXFLAGS) -g
 EXTRA_LDFLAGS += -L$(PREFIX)/lib
 LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 
@@ -264,6 +271,12 @@ else ifeq ($(shell openssl version >/dev/null 2>&1 || echo FAIL),)
 SHA512SUM = openssl dgst -sha512
 else
 SHA512SUM = $(error SHA-512 checksumming not found!)
+endif
+
+ifeq ($(shell protoc --version >/dev/null 2>&1 || echo FAIL),)
+PROTOC = protoc
+else
+PROTOC ?= $(error Protobuf compiler (protoc) not found!)
 endif
 
 #
@@ -405,7 +418,7 @@ package: install
 	cp -R $(PREFIX) tmp/
 	# remove useless files
 	cd tmp/$(notdir $(PREFIX)); \
-		cd share; rm -Rf man doc gtk-doc info lua projectM gettext; cd ..; \
+		cd share; rm -Rf man doc gtk-doc info lua projectM; cd ..; \
 		rm -Rf man sbin etc lib/lua lib/sidplay
 	cd tmp/$(notdir $(PREFIX)) && $(abspath $(SRC))/change_prefix.sh $(PREFIX) @@CONTRIB_PREFIX@@
 	(cd tmp && tar c $(notdir $(PREFIX))/) | bzip2 -c > ../vlc-contrib-$(HOST)-$(DATE).tar.bz2
@@ -432,13 +445,21 @@ list:
 toolchain.cmake:
 	$(RM) $@
 ifdef HAVE_WIN32
+ifdef HAVE_WINDOWSPHONE
+	echo "set(CMAKE_SYSTEM_NAME WindowsPhone)" >> $@
+else
+ifdef HAVE_WINSTORE
+	echo "set(CMAKE_SYSTEM_NAME WindowsStore)" >> $@
+else
 	echo "set(CMAKE_SYSTEM_NAME Windows)" >> $@
+endif
+endif
 	echo "set(CMAKE_RC_COMPILER $(HOST)-windres)" >> $@
 endif
 ifdef HAVE_DARWIN_OS
 	echo "set(CMAKE_SYSTEM_NAME Darwin)" >> $@
 	echo "set(CMAKE_C_FLAGS $(CFLAGS))" >> $@
-	echo "set(CMAKE_CXX_FLAGS $(CFLAGS))" >> $@
+	echo "set(CMAKE_CXX_FLAGS $(CFLAGS) $(EXTRA_CXXFLAGS))" >> $@
 	echo "set(CMAKE_LD_FLAGS $(LDFLAGS))" >> $@
 	echo "set(CMAKE_AR ar CACHE FILEPATH "Archiver")" >> $@
 ifdef HAVE_IOS

@@ -33,7 +33,6 @@
 
 #include <limits.h>
 #include <assert.h>
-#include <errno.h>
 #include <math.h>
 #include <sys/stat.h>
 
@@ -41,9 +40,7 @@
 #include "event.h"
 #include "es_out.h"
 #include "es_out_timeshift.h"
-#include "access.h"
 #include "demux.h"
-#include "stream.h"
 #include "item.h"
 #include "resource.h"
 
@@ -58,9 +55,8 @@
 /*****************************************************************************
  * Local prototypes
  *****************************************************************************/
-static void Destructor( input_thread_t * p_input );
-
-static  void *Run            ( void * );
+static  void *Run( void * );
+static  void *Preparse( void * );
 
 static input_thread_t * Create  ( vlc_object_t *, input_item_t *,
                                   const char *, bool, input_resource_t * );
@@ -80,11 +76,10 @@ static void UpdateTitleListfromDemux( input_thread_t * );
 
 static void MRLSections( const char *, int *, int *, int *, int *);
 
-static input_source_t *InputSourceNew( input_thread_t *);
-static int  InputSourceInit( input_thread_t *, input_source_t *,
-                             const char *, const char *psz_forced_demux,
-                             bool b_in_can_fail );
-static void InputSourceClean( input_source_t * );
+static input_source_t *InputSourceNew( input_thread_t *, const char *,
+                                       const char *psz_forced_demux,
+                                       bool b_in_can_fail );
+static void InputSourceDestroy( input_source_t * );
 static void InputSourceMeta( input_thread_t *, input_source_t *, vlc_meta_t * );
 
 /* TODO */
@@ -108,7 +103,7 @@ enum {
 };
 
 static void input_SubtitleAdd( input_thread_t *, const char *, unsigned );
-static void input_SubtitleFileAdd( input_thread_t *, char *, unsigned );
+static void input_SubtitleFileAdd( input_thread_t *, const char *, unsigned, bool );
 static void input_ChangeState( input_thread_t *p_input, int i_state ); /* TODO fix name */
 
 #undef input_Create
@@ -129,27 +124,6 @@ input_thread_t *input_Create( vlc_object_t *p_parent,
                               const char *psz_log, input_resource_t *p_resource )
 {
     return Create( p_parent, p_item, psz_log, false, p_resource );
-}
-
-#undef input_CreateAndStart
-/**
- * Create a new input_thread_t and start it.
- *
- * Provided for convenience.
- *
- * \see input_Create
- */
-input_thread_t *input_CreateAndStart( vlc_object_t *p_parent,
-                                      input_item_t *p_item, const char *psz_log )
-{
-    input_thread_t *p_input = input_Create( p_parent, p_item, psz_log, NULL );
-
-    if( input_Start( p_input ) )
-    {
-        vlc_object_release( p_input );
-        return NULL;
-    }
-    return p_input;
 }
 
 #undef input_Read
@@ -176,41 +150,10 @@ int input_Read( vlc_object_t *p_parent, input_item_t *p_item )
     return VLC_SUCCESS;
 }
 
-/**
- * Initialize an input and initialize it to preparse the item
- * This function is blocking. It will only accept parsing regular files.
- *
- * \param p_parent a vlc_object_t
- * \param p_item an input item
- * \return VLC_SUCCESS or an error
- */
-int input_Preparse( vlc_object_t *p_parent, input_item_t *p_item )
+input_thread_t *input_CreatePreparser( vlc_object_t *parent,
+                                       input_item_t *item )
 {
-    input_thread_t *p_input;
-
-    /* Allocate descriptor */
-    p_input = Create( p_parent, p_item, NULL, true, NULL );
-    if( !p_input )
-        return VLC_EGENERIC;
-
-    if( !Init( p_input ) ) {
-        /* if the demux is a playlist, call Mainloop that will call
-         * demux_Demux in order to fetch sub items */
-        bool b_is_playlist = false;
-
-        if ( input_item_ShouldPreparseSubItems( p_item )
-          && demux_Control( p_input->p->input.p_demux,
-                            DEMUX_IS_PLAYLIST,
-                            &b_is_playlist ) )
-            b_is_playlist = false;
-        if( b_is_playlist )
-            MainLoop( p_input, false );
-        End( p_input );
-    }
-
-    vlc_object_release( p_input );
-
-    return VLC_SUCCESS;
+    return Create( parent, item, NULL, true, NULL );
 }
 
 /**
@@ -222,9 +165,15 @@ int input_Preparse( vlc_object_t *p_parent, input_item_t *p_item )
  */
 int input_Start( input_thread_t *p_input )
 {
+    void *(*func)(void *) = Run;
+
+    if( p_input->b_preparsing )
+        func = Preparse;
+
+    assert( !p_input->p->is_running );
     /* Create thread and wait for its readiness. */
-    p_input->p->is_running = !vlc_clone( &p_input->p->thread,
-                                         Run, p_input, VLC_THREAD_PRIORITY_INPUT );
+    p_input->p->is_running = !vlc_clone( &p_input->p->thread, func, p_input,
+                                         VLC_THREAD_PRIORITY_INPUT );
     if( !p_input->p->is_running )
     {
         input_ChangeState( p_input, ERROR_S );
@@ -241,22 +190,20 @@ int input_Start( input_thread_t *p_input )
  */
 void input_Stop( input_thread_t *p_input )
 {
-    /* Set die for input and ALL of this childrens (even (grand-)grand-childrens)
-     * It is needed here even if it is done in INPUT_CONTROL_SET_DIE handler to
-     * unlock the control loop */
-    ObjectKillChildrens( VLC_OBJECT(p_input) );
-    input_ControlPush( p_input, INPUT_CONTROL_SET_DIE, NULL );
-}
+    input_thread_private_t *sys = p_input->p;
 
-void input_Join( input_thread_t *p_input )
-{
-    if( p_input->p->is_running )
-        vlc_join( p_input->p->thread, NULL );
-}
-
-void input_Release( input_thread_t *p_input )
-{
-    vlc_object_release( p_input );
+    vlc_mutex_lock( &sys->lock_control );
+    /* Discard all pending controls */
+    for( int i = 0; i < sys->i_control; i++ )
+    {
+        input_control_t *ctrl = &sys->control[i];
+        ControlRelease( ctrl->i_type, ctrl->val );
+    }
+    sys->i_control = 0;
+    sys->is_stopped = true;
+    vlc_cond_signal( &sys->wait_control );
+    vlc_mutex_unlock( &sys->lock_control );
+    vlc_interrupt_kill( &sys->interrupt );
 }
 
 /**
@@ -266,8 +213,45 @@ void input_Release( input_thread_t *p_input )
  */
 void input_Close( input_thread_t *p_input )
 {
-    input_Join( p_input );
-    input_Release( p_input );
+    if( p_input->p->is_running )
+        vlc_join( p_input->p->thread, NULL );
+    vlc_interrupt_deinit( &p_input->p->interrupt );
+    vlc_object_release( p_input );
+}
+
+/**
+ * Input destructor (called when the object's refcount reaches 0).
+ */
+static void input_Destructor( vlc_object_t *obj )
+{
+    input_thread_t *p_input = (input_thread_t *)obj;
+#ifndef NDEBUG
+    char * psz_name = input_item_GetName( p_input->p->p_item );
+    msg_Dbg( p_input, "Destroying the input for '%s'", psz_name);
+    free( psz_name );
+#endif
+
+    if( p_input->p->p_es_out_display )
+        es_out_Delete( p_input->p->p_es_out_display );
+
+    if( p_input->p->p_resource )
+        input_resource_Release( p_input->p->p_resource );
+    if( p_input->p->p_resource_private )
+        input_resource_Release( p_input->p->p_resource_private );
+
+    vlc_gc_decref( p_input->p->p_item );
+
+    vlc_mutex_destroy( &p_input->p->counters.counters_lock );
+
+    for( int i = 0; i < p_input->p->i_control; i++ )
+    {
+        input_control_t *p_ctrl = &p_input->p->control[i];
+        ControlRelease( p_ctrl->i_type, p_ctrl->val );
+    }
+
+    vlc_cond_destroy( &p_input->p->wait_control );
+    vlc_mutex_destroy( &p_input->p->lock_control );
+    free( p_input->p );
 }
 
 /**
@@ -293,7 +277,6 @@ static input_thread_t *Create( vlc_object_t *p_parent, input_item_t *p_item,
                                input_resource_t *p_resource )
 {
     input_thread_t *p_input = NULL;                 /* thread descriptor */
-    int i;
 
     /* Allocate descriptor */
     p_input = vlc_custom_create( p_parent, sizeof( *p_input ), "input" );
@@ -324,18 +307,18 @@ static input_thread_t *Create( vlc_object_t *p_parent, input_item_t *p_item,
     p_input->psz_header = psz_header ? strdup( psz_header ) : NULL;
 
     /* Init Common fields */
-    p_input->b_eof = false;
     p_input->p->b_can_pace_control = true;
     p_input->p->i_start = 0;
     p_input->p->i_time  = 0;
     p_input->p->i_stop  = 0;
-    p_input->p->i_run   = 0;
     p_input->p->i_title = 0;
     p_input->p->title = NULL;
     p_input->p->i_title_offset = p_input->p->i_seekpoint_offset = 0;
     p_input->p->i_state = INIT_S;
-    p_input->p->i_rate = INPUT_RATE_DEFAULT;
+    p_input->p->is_running = false;
+    p_input->p->is_stopped = false;
     p_input->p->b_recording = false;
+    p_input->p->i_rate = INPUT_RATE_DEFAULT;
     memset( &p_input->p->bookmark, 0, sizeof(p_input->p->bookmark) );
     TAB_INIT( p_input->p->i_bookmark, p_input->p->pp_bookmark );
     TAB_INIT( p_input->p->i_attachment, p_input->p->attachment );
@@ -347,16 +330,7 @@ static input_thread_t *Create( vlc_object_t *p_parent, input_item_t *p_item,
     p_input->p->p_item = p_item;
 
     /* Init Input fields */
-    p_input->p->input.p_demux  = NULL;
-    p_input->p->input.b_title_demux = false;
-    p_input->p->input.i_title  = 0;
-    p_input->p->input.title    = NULL;
-    p_input->p->input.i_title_offset = p_input->p->input.i_seekpoint_offset = 0;
-    p_input->p->input.b_can_pace_control = true;
-    p_input->p->input.b_can_rate_control = true;
-    p_input->p->input.b_rescale_ts = true;
-    p_input->p->input.b_eof = false;
-
+    p_input->p->master = NULL;
     vlc_mutex_lock( &p_item->lock );
 
     if( !p_item->p_stats )
@@ -379,6 +353,21 @@ static input_thread_t *Create( vlc_object_t *p_parent, input_item_t *p_item,
             free (psz_rec);
         } else
             p_item->i_preparse_depth = -1;
+    }
+
+    /* */
+    if( p_input->b_preparsing )
+        p_input->i_flags |= OBJECT_FLAGS_QUIET | OBJECT_FLAGS_NOINTERACT;
+
+    /* Make sure the interaction option is honored */
+    if( !var_InheritBool( p_input, "interact" ) )
+        p_input->i_flags |= OBJECT_FLAGS_NOINTERACT;
+    else if( p_item->b_preparse_interact )
+    {
+        /* If true, this item was asked explicitly to interact with the user
+         * (via libvlc_MetaRequest). Sub items created from this input won't
+         * have this flag and won't interact with the user */
+        p_input->i_flags &= ~OBJECT_FLAGS_NOINTERACT;
     }
 
     vlc_mutex_unlock( &p_item->lock );
@@ -404,7 +393,7 @@ static input_thread_t *Create( vlc_object_t *p_parent, input_item_t *p_item,
     vlc_mutex_init( &p_input->p->lock_control );
     vlc_cond_init( &p_input->p->wait_control );
     p_input->p->i_control = 0;
-    p_input->p->is_running = false;
+    vlc_interrupt_init(&p_input->p->interrupt);
 
     /* Create Object Variables for private use only */
     input_ConfigVarInit( p_input );
@@ -441,10 +430,6 @@ static input_thread_t *Create( vlc_object_t *p_parent, input_item_t *p_item,
                      {
                          p_seekpoint->psz_name = strdup(psz_start + 5);
                      }
-                     else if( !strncmp( psz_start, "bytes=", 6 ) )
-                     {
-                         p_seekpoint->i_byte_offset = atoll(psz_start + 6);
-                     }
                      else if( !strncmp( psz_start, "time=", 5 ) )
                      {
                          p_seekpoint->i_time_offset = atoll(psz_start + 5) *
@@ -452,8 +437,8 @@ static input_thread_t *Create( vlc_object_t *p_parent, input_item_t *p_item,
                      }
                      psz_start = psz_end + 1;
                 }
-                msg_Dbg( p_input, "adding bookmark: %s, bytes=%"PRId64", time=%"PRId64,
-                                  p_seekpoint->psz_name, p_seekpoint->i_byte_offset,
+                msg_Dbg( p_input, "adding bookmark: %s, time=%"PRId64,
+                                  p_seekpoint->psz_name,
                                   p_seekpoint->i_time_offset );
                 input_Control( p_input, INPUT_ADD_BOOKMARK, p_seekpoint );
                 vlc_seekpoint_Delete( p_seekpoint );
@@ -469,14 +454,6 @@ static input_thread_t *Create( vlc_object_t *p_parent, input_item_t *p_item,
     input_SendEventMeta( p_input );
 
     /* */
-    if( p_input->b_preparsing )
-        p_input->i_flags |= OBJECT_FLAGS_QUIET | OBJECT_FLAGS_NOINTERACT;
-
-    /* Make sure the interaction option is honored */
-    if( !var_InheritBool( p_input, "interact" ) )
-        p_input->i_flags |= OBJECT_FLAGS_NOINTERACT;
-
-    /* */
     memset( &p_input->p->counters, 0, sizeof( p_input->p->counters ) );
     vlc_mutex_init( &p_input->p->counters.counters_lock );
 
@@ -484,43 +461,9 @@ static input_thread_t *Create( vlc_object_t *p_parent, input_item_t *p_item,
     p_input->p->p_es_out = NULL;
 
     /* Set the destructor when we are sure we are initialized */
-    vlc_object_set_destructor( p_input, (vlc_destructor_t)Destructor );
+    vlc_object_set_destructor( p_input, input_Destructor );
 
     return p_input;
-}
-
-/**
- * Input destructor (called when the object's refcount reaches 0).
- */
-static void Destructor( input_thread_t * p_input )
-{
-#ifndef NDEBUG
-    char * psz_name = input_item_GetName( p_input->p->p_item );
-    msg_Dbg( p_input, "Destroying the input for '%s'", psz_name);
-    free( psz_name );
-#endif
-
-    if( p_input->p->p_es_out_display )
-        es_out_Delete( p_input->p->p_es_out_display );
-
-    if( p_input->p->p_resource )
-        input_resource_Release( p_input->p->p_resource );
-    if( p_input->p->p_resource_private )
-        input_resource_Release( p_input->p->p_resource_private );
-
-    vlc_gc_decref( p_input->p->p_item );
-
-    vlc_mutex_destroy( &p_input->p->counters.counters_lock );
-
-    for( int i = 0; i < p_input->p->i_control; i++ )
-    {
-        input_control_t *p_ctrl = &p_input->p->control[i];
-        ControlRelease( p_ctrl->i_type, p_ctrl->val );
-    }
-
-    vlc_cond_destroy( &p_input->p->wait_control );
-    vlc_mutex_destroy( &p_input->p->lock_control );
-    free( p_input->p );
 }
 
 /*****************************************************************************
@@ -531,14 +474,16 @@ static void Destructor( input_thread_t * p_input )
 static void *Run( void *obj )
 {
     input_thread_t *p_input = (input_thread_t *)obj;
-    const int canc = vlc_savecancel();
+
+    vlc_interrupt_set(&p_input->p->interrupt);
 
     if( !Init( p_input ) )
     {
-        if( var_InheritBool( p_input, "start-paused" ) )
+        if( p_input->p->b_can_pace_control && p_input->p->b_out_pace_control )
         {
-            const mtime_t i_control_date = mdate();
-            ControlPause( p_input, i_control_date );
+            /* We don't want a high input priority here or we'll
+             * end-up sucking up all the CPU time */
+            vlc_set_priority( p_input->p->thread, VLC_THREAD_PRIORITY_LOW );
         }
 
         MainLoop( p_input, true ); /* FIXME it can be wrong (like with VLM) */
@@ -548,9 +493,43 @@ static void *Run( void *obj )
     }
 
     input_SendEventDead( p_input );
-
-    vlc_restorecancel( canc );
     return NULL;
+}
+
+static void *Preparse( void *obj )
+{
+    input_thread_t *p_input = (input_thread_t *)obj;
+
+    vlc_interrupt_set(&p_input->p->interrupt);
+
+    if( !Init( p_input ) )
+    {   /* if the demux is a playlist, call Mainloop that will call
+         * demux_Demux in order to fetch sub items */
+        bool b_is_playlist = false;
+
+        if ( input_item_ShouldPreparseSubItems( p_input->p->p_item )
+          && demux_Control( p_input->p->master->p_demux,
+                            DEMUX_IS_PLAYLIST,
+                            &b_is_playlist ) )
+            b_is_playlist = false;
+        if( b_is_playlist )
+            MainLoop( p_input, false );
+        End( p_input );
+    }
+
+    input_SendEventDead( p_input );
+    return NULL;
+}
+
+bool input_Stopped( input_thread_t *input )
+{
+    input_thread_private_t *sys = input->p;
+    bool ret;
+
+    vlc_mutex_lock( &sys->lock_control );
+    ret = sys->is_stopped;
+    vlc_mutex_unlock( &sys->lock_control );
+    return ret;
 }
 
 /*****************************************************************************
@@ -561,28 +540,27 @@ static void *Run( void *obj )
  * MainLoopDemux
  * It asks the demuxer to demux some data
  */
-static void MainLoopDemux( input_thread_t *p_input, bool *pb_changed, mtime_t i_start_mdate )
+static void MainLoopDemux( input_thread_t *p_input, bool *pb_changed )
 {
     int i_ret;
 
     *pb_changed = false;
 
-    if( ( p_input->p->i_stop > 0 && p_input->p->i_time >= p_input->p->i_stop ) ||
-        ( p_input->p->i_run > 0 && i_start_mdate+p_input->p->i_run < mdate() ) )
+    if( p_input->p->i_stop > 0 && p_input->p->i_time >= p_input->p->i_stop )
         i_ret = 0; /* EOF */
     else
-        i_ret = demux_Demux( p_input->p->input.p_demux );
+        i_ret = demux_Demux( p_input->p->master->p_demux );
 
     if( i_ret > 0 )
     {
-        if( p_input->p->input.p_demux->info.i_update )
+        if( p_input->p->master->p_demux->info.i_update )
         {
-            if( p_input->p->input.p_demux->info.i_update & INPUT_UPDATE_TITLE_LIST )
+            if( p_input->p->master->p_demux->info.i_update & INPUT_UPDATE_TITLE_LIST )
             {
                 UpdateTitleListfromDemux( p_input );
-                p_input->p->input.p_demux->info.i_update &= ~INPUT_UPDATE_TITLE_LIST;
+                p_input->p->master->p_demux->info.i_update &= ~INPUT_UPDATE_TITLE_LIST;
             }
-            if( p_input->p->input.b_title_demux )
+            if( p_input->p->master->b_title_demux )
             {
                 i_ret = UpdateTitleSeekpointFromDemux( p_input );
                 *pb_changed = true;
@@ -594,7 +572,7 @@ static void MainLoopDemux( input_thread_t *p_input, bool *pb_changed, mtime_t i_
     if( i_ret == 0 )    /* EOF */
     {
         msg_Dbg( p_input, "EOF reached" );
-        p_input->p->input.b_eof = true;
+        p_input->p->master->b_eof = true;
         es_out_Eos(p_input->p->p_es_out);
     }
     else if( i_ret < 0 )
@@ -606,10 +584,10 @@ static void MainLoopDemux( input_thread_t *p_input, bool *pb_changed, mtime_t i_
         SlaveDemux( p_input );
 }
 
-static int MainLoopTryRepeat( input_thread_t *p_input, mtime_t *pi_start_mdate )
+static int MainLoopTryRepeat( input_thread_t *p_input )
 {
     int i_repeat = var_GetInteger( p_input, "input-repeat" );
-    if( i_repeat == 0 )
+    if( i_repeat <= 0 )
         return VLC_EGENERIC;
 
     vlc_value_t val;
@@ -622,15 +600,15 @@ static int MainLoopTryRepeat( input_thread_t *p_input, mtime_t *pi_start_mdate )
     }
 
     /* Seek to start title/seekpoint */
-    val.i_int = p_input->p->input.i_title_start -
-        p_input->p->input.i_title_offset;
-    if( val.i_int < 0 || val.i_int >= p_input->p->input.i_title )
+    val.i_int = p_input->p->master->i_title_start -
+        p_input->p->master->i_title_offset;
+    if( val.i_int < 0 || val.i_int >= p_input->p->master->i_title )
         val.i_int = 0;
     input_ControlPush( p_input,
                        INPUT_CONTROL_SET_TITLE, &val );
 
-    val.i_int = p_input->p->input.i_seekpoint_start -
-        p_input->p->input.i_seekpoint_offset;
+    val.i_int = p_input->p->master->i_seekpoint_start -
+        p_input->p->master->i_seekpoint_offset;
     if( val.i_int > 0 /* TODO: check upper boundary */ )
         input_ControlPush( p_input,
                            INPUT_CONTROL_SET_SEEKPOINT, &val );
@@ -638,7 +616,7 @@ static int MainLoopTryRepeat( input_thread_t *p_input, mtime_t *pi_start_mdate )
     /* Seek to start position */
     if( p_input->p->i_start > 0 )
     {
-        val.i_time = p_input->p->i_start;
+        val.i_int = p_input->p->i_start;
         input_ControlPush( p_input, INPUT_CONTROL_SET_TIME, &val );
     }
     else
@@ -647,8 +625,6 @@ static int MainLoopTryRepeat( input_thread_t *p_input, mtime_t *pi_start_mdate )
         input_ControlPush( p_input, INPUT_CONTROL_SET_POSITION, &val );
     }
 
-    /* */
-    *pi_start_mdate = mdate();
     return VLC_SUCCESS;
 }
 
@@ -662,16 +638,16 @@ static void MainLoopStatistics( input_thread_t *p_input )
     mtime_t i_length = 0;
 
     /* update input status variables */
-    if( demux_Control( p_input->p->input.p_demux,
+    if( demux_Control( p_input->p->master->p_demux,
                        DEMUX_GET_POSITION, &f_position ) )
         f_position = 0.0;
 
-    if( demux_Control( p_input->p->input.p_demux,
+    if( demux_Control( p_input->p->master->p_demux,
                        DEMUX_GET_TIME, &i_time ) )
         i_time = 0;
     p_input->p->i_time = i_time;
 
-    if( demux_Control( p_input->p->input.p_demux,
+    if( demux_Control( p_input->p->master->p_demux,
                        DEMUX_GET_LENGTH, &i_length ) )
         i_length = 0;
 
@@ -680,7 +656,6 @@ static void MainLoopStatistics( input_thread_t *p_input )
     /* update current bookmark */
     vlc_mutex_lock( &p_input->p->p_item->lock );
     p_input->p->bookmark.i_time_offset = i_time;
-    p_input->p->bookmark.i_byte_offset = -1;
     vlc_mutex_unlock( &p_input->p->p_item->lock );
 
     stats_ComputeInputStats( p_input, p_input->p->p_item->p_stats );
@@ -693,13 +668,16 @@ static void MainLoopStatistics( input_thread_t *p_input )
  */
 static void MainLoop( input_thread_t *p_input, bool b_interactive )
 {
-    mtime_t i_start_mdate = mdate();
     mtime_t i_intf_update = 0;
     mtime_t i_last_seek_mdate = 0;
-    bool b_pause_after_eof = b_interactive &&
-                             var_CreateGetBool( p_input, "play-and-pause" );
 
-    while( vlc_object_alive( p_input ) && !p_input->b_error )
+    if( b_interactive && var_InheritBool( p_input, "start-paused" ) )
+        ControlPause( p_input, mdate() );
+
+    bool b_pause_after_eof = b_interactive &&
+                             var_InheritBool( p_input, "play-and-pause" );
+
+    while( !input_Stopped( p_input ) && p_input->p->i_state != ERROR_S )
     {
         mtime_t i_wakeup = -1;
         bool b_paused = p_input->p->i_state == PAUSE_S;
@@ -707,17 +685,19 @@ static void MainLoop( input_thread_t *p_input, bool b_interactive )
          * is paused -> this may cause problem with some of them
          * The same problem can be seen when seeking while paused */
         if( b_paused )
-            b_paused = !es_out_GetBuffering( p_input->p->p_es_out ) || p_input->p->input.b_eof;
+            b_paused = !es_out_GetBuffering( p_input->p->p_es_out )
+                    || p_input->p->master->b_eof;
 
         if( !b_paused )
         {
-            if( !p_input->p->input.b_eof )
+            if( !p_input->p->master->b_eof )
             {
                 bool b_force_update = false;
 
-                MainLoopDemux( p_input, &b_force_update, i_start_mdate );
-                i_wakeup = es_out_GetWakeup( p_input->p->p_es_out );
+                MainLoopDemux( p_input, &b_force_update );
 
+                if( p_input->p->master->p_demux->pf_demux != NULL )
+                    i_wakeup = es_out_GetWakeup( p_input->p->p_es_out );
                 if( b_force_update )
                     i_intf_update = 0;
             }
@@ -739,9 +719,8 @@ static void MainLoop( input_thread_t *p_input, bool b_interactive )
             }
             else
             {
-                if( MainLoopTryRepeat( p_input, &i_start_mdate ) )
+                if( MainLoopTryRepeat( p_input ) )
                     break;
-                b_pause_after_eof = var_GetBool( p_input, "play-and-pause" );
             }
 
             /* Update interface and statistics */
@@ -761,7 +740,7 @@ static void MainLoop( input_thread_t *p_input, bool b_interactive )
             /* Postpone seeking until ES buffering is complete or at most
              * 125 ms. */
             bool b_postpone = es_out_GetBuffering( p_input->p->p_es_out )
-                            && !p_input->p->input.b_eof;
+                            && !p_input->p->master->b_eof;
             if( b_postpone )
             {
                 mtime_t now = mdate();
@@ -799,9 +778,6 @@ static void MainLoop( input_thread_t *p_input, bool b_interactive )
                 i_wakeup = es_out_GetWakeup( p_input->p->p_es_out );
         }
     }
-
-    if( !p_input->b_error )
-        input_ChangeState( p_input, END_S );
 }
 
 static void InitStatistics( input_thread_t * p_input )
@@ -871,7 +847,7 @@ static int InitSout( input_thread_t * p_input )
 
 static void InitTitle( input_thread_t * p_input )
 {
-    input_source_t *p_master = &p_input->p->input;
+    input_source_t *p_master = p_input->p->master;
 
     if( p_input->b_preparsing )
         return;
@@ -901,13 +877,13 @@ static void StartTitle( input_thread_t * p_input )
     vlc_value_t val;
 
     /* Start title/chapter */
-    val.i_int = p_input->p->input.i_title_start -
-                p_input->p->input.i_title_offset;
-    if( val.i_int > 0 && val.i_int < p_input->p->input.i_title )
+    val.i_int = p_input->p->master->i_title_start -
+                p_input->p->master->i_title_offset;
+    if( val.i_int > 0 && val.i_int < p_input->p->master->i_title )
         input_ControlPush( p_input, INPUT_CONTROL_SET_TITLE, &val );
 
-    val.i_int = p_input->p->input.i_seekpoint_start -
-                p_input->p->input.i_seekpoint_offset;
+    val.i_int = p_input->p->master->i_seekpoint_start -
+                p_input->p->master->i_seekpoint_offset;
     if( val.i_int > 0 /* TODO: check upper boundary */ )
         input_ControlPush( p_input, INPUT_CONTROL_SET_SEEKPOINT, &val );
 
@@ -916,12 +892,17 @@ static void StartTitle( input_thread_t * p_input )
                                      * var_GetFloat( p_input, "start-time" ));
     p_input->p->i_stop  = llroundf(1000000.f
                                      * var_GetFloat( p_input, "stop-time" ));
-    p_input->p->i_run   = llroundf(1000000.f
-                                     * var_GetFloat( p_input, "run-time" ));
-    if( p_input->p->i_run < 0 )
+    if( p_input->p->i_stop <= 0 )
     {
-        msg_Warn( p_input, "invalid run-time ignored" );
-        p_input->p->i_run = 0;
+        p_input->p->i_stop = llroundf(1000000.f
+                                     * var_GetFloat( p_input, "run-time" ));
+        if( p_input->p->i_stop < 0 )
+        {
+            msg_Warn( p_input, "invalid run-time ignored" );
+            p_input->p->i_stop = 0;
+        }
+        else
+            p_input->p->i_stop += p_input->p->i_start;
     }
 
     if( p_input->p->i_start > 0 )
@@ -931,7 +912,7 @@ static void StartTitle( input_thread_t * p_input )
         msg_Dbg( p_input, "starting at time: %ds",
                  (int)( p_input->p->i_start / CLOCK_FREQ ) );
 
-        s.i_time = p_input->p->i_start;
+        s.i_int = p_input->p->i_start;
         input_ControlPush( p_input, INPUT_CONTROL_SET_TIME, &s );
     }
     if( p_input->p->i_stop > 0 && p_input->p->i_stop <= p_input->p->i_start )
@@ -946,7 +927,7 @@ static void LoadSubtitles( input_thread_t *p_input )
 {
     /* Load subtitles */
     /* Get fps and set it if not already set */
-    const float f_fps = p_input->p->f_fps;
+    const float f_fps = p_input->p->master->f_fps;
     if( f_fps > 1.f )
     {
         var_Create( p_input, "sub-original-fps", VLC_VAR_FLOAT );
@@ -963,7 +944,7 @@ static void LoadSubtitles( input_thread_t *p_input )
 
     const int i_delay = var_CreateGetInteger( p_input, "sub-delay" );
     if( i_delay != 0 )
-        var_SetTime( p_input, "spu-delay", (mtime_t)i_delay * 100000 );
+        var_SetInteger( p_input, "spu-delay", (mtime_t)i_delay * 100000 );
 
     /* Look for and add subtitle files */
     unsigned i_flags = SUB_FORCED;
@@ -972,7 +953,7 @@ static void LoadSubtitles( input_thread_t *p_input )
     if( psz_subtitle != NULL )
     {
         msg_Dbg( p_input, "forced subtitle: %s", psz_subtitle );
-        input_SubtitleFileAdd( p_input, psz_subtitle, i_flags );
+        input_SubtitleFileAdd( p_input, psz_subtitle, i_flags, true );
         i_flags = SUB_NOFLAG;
     }
 
@@ -988,7 +969,7 @@ static void LoadSubtitles( input_thread_t *p_input )
             if( !psz_subtitle || strcmp( psz_subtitle, ppsz_subs[i] ) )
             {
                 i_flags |= SUB_CANFAIL;
-                input_SubtitleFileAdd( p_input, ppsz_subs[i], i_flags );
+                input_SubtitleFileAdd( p_input, ppsz_subs[i], i_flags, false );
                 i_flags = SUB_NOFLAG;
             }
 
@@ -1021,7 +1002,7 @@ static void LoadSubtitles( input_thread_t *p_input )
         if( !a )
             continue;
         char *psz_mrl;
-        if( a->psz_name[i] &&
+        if( a->psz_name[0] &&
             asprintf( &psz_mrl, "attachment://%s", a->psz_name ) >= 0 )
         {
             var_SetString( p_input, "sub-description", a->psz_description ? a->psz_description : "");
@@ -1064,11 +1045,9 @@ static void LoadSlaves( input_thread_t *p_input )
             continue;
         msg_Dbg( p_input, "adding slave input '%s'", uri );
 
-        input_source_t *p_slave = InputSourceNew( p_input );
-        if( p_slave && !InputSourceInit( p_input, p_slave, uri, NULL, false ) )
+        input_source_t *p_slave = InputSourceNew( p_input, uri, NULL, false );
+        if( p_slave )
             TAB_APPEND( p_input->p->i_slave, p_input->p->slave, p_slave );
-        else
-            free( p_slave );
         free( uri );
     }
     free( psz_org );
@@ -1079,7 +1058,7 @@ static void UpdatePtsDelay( input_thread_t *p_input )
     input_thread_private_t *p_sys = p_input->p;
 
     /* Get max pts delay from input source */
-    mtime_t i_pts_delay = p_sys->input.i_pts_delay;
+    mtime_t i_pts_delay = p_sys->master->i_pts_delay;
     for( int i = 0; i < p_sys->i_slave; i++ )
         i_pts_delay = __MAX( i_pts_delay, p_sys->slave[i]->i_pts_delay );
 
@@ -1087,8 +1066,8 @@ static void UpdatePtsDelay( input_thread_t *p_input )
         i_pts_delay = 0;
 
     /* Take care of audio/spu delay */
-    const mtime_t i_audio_delay = var_GetTime( p_input, "audio-delay" );
-    const mtime_t i_spu_delay   = var_GetTime( p_input, "spu-delay" );
+    const mtime_t i_audio_delay = var_GetInteger( p_input, "audio-delay" );
+    const mtime_t i_spu_delay   = var_GetInteger( p_input, "spu-delay" );
     const mtime_t i_extra_delay = __MIN( i_audio_delay, i_spu_delay );
     if( i_extra_delay < 0 )
         i_pts_delay -= i_extra_delay;
@@ -1145,23 +1124,25 @@ static void InitPrograms( input_thread_t * p_input )
     /* Inform the demuxer about waited group (needed only for DVB) */
     if( i_es_out_mode == ES_OUT_MODE_ALL )
     {
-        demux_Control( p_input->p->input.p_demux, DEMUX_SET_GROUP, -1, NULL );
+        demux_Control( p_input->p->master->p_demux, DEMUX_SET_GROUP, -1, NULL );
     }
     else if( i_es_out_mode == ES_OUT_MODE_PARTIAL )
     {
-        demux_Control( p_input->p->input.p_demux, DEMUX_SET_GROUP, -1,
+        demux_Control( p_input->p->master->p_demux, DEMUX_SET_GROUP, -1,
                        &list );
         TAB_CLEAN( list.i_count, list.p_values );
     }
     else
     {
-        demux_Control( p_input->p->input.p_demux, DEMUX_SET_GROUP,
+        demux_Control( p_input->p->master->p_demux, DEMUX_SET_GROUP,
                        es_out_GetGroupForced( p_input->p->p_es_out ), NULL );
     }
 }
 
 static int Init( input_thread_t * p_input )
 {
+    input_source_t *master;
+
     for( int i = 0; i < p_input->p->p_item->i_options; i++ )
     {
         if( !strncmp( p_input->p->p_item->ppsz_options[i], "meta-file", 9 ) )
@@ -1190,19 +1171,18 @@ static int Init( input_thread_t * p_input )
     input_SendEventCache( p_input, 0.0 );
 
     /* */
-    if( InputSourceInit( p_input, &p_input->p->input,
-                         p_input->p->p_item->psz_uri, NULL, false ) )
-    {
+    master = InputSourceNew( p_input, p_input->p->p_item->psz_uri, NULL,
+                             false );
+    if( master == NULL )
         goto error;
-    }
+    p_input->p->master = master;
 
     InitTitle( p_input );
 
     /* Load master infos */
     /* Init length */
     mtime_t i_length;
-    if( demux_Control( p_input->p->input.p_demux, DEMUX_GET_LENGTH,
-                         &i_length ) )
+    if( demux_Control( master->p_demux, DEMUX_GET_LENGTH, &i_length ) )
         i_length = 0;
     if( i_length <= 0 )
         i_length = input_item_GetDuration( p_input->p->p_item );
@@ -1229,13 +1209,6 @@ static int Init( input_thread_t * p_input )
     {
         p_input->p->b_out_pace_control = (p_input->p->p_sout->i_out_pace_nocontrol > 0);
 
-        if( p_input->p->b_can_pace_control && p_input->p->b_out_pace_control )
-        {
-            /* We don't want a high input priority here or we'll
-             * end-up sucking up all the CPU time */
-            vlc_set_priority( p_input->p->thread, VLC_THREAD_PRIORITY_LOW );
-        }
-
         msg_Dbg( p_input, "starting in %s mode",
                  p_input->p->b_out_pace_control ? "async" : "sync" );
     }
@@ -1247,7 +1220,7 @@ static int Init( input_thread_t * p_input )
         InputMetaUser( p_input, p_meta );
 
         /* Get meta data from master input */
-        InputSourceMeta( p_input, &p_input->p->input, p_meta );
+        InputSourceMeta( p_input, master, p_meta );
 
         /* And from slave */
         for( int i = 0; i < p_input->p->i_slave; i++ )
@@ -1311,7 +1284,6 @@ error:
     }
 
     /* Mark them deleted */
-    p_input->p->input.p_demux = NULL;
     p_input->p->p_es_out = NULL;
     p_input->p->p_sout = NULL;
 
@@ -1323,8 +1295,6 @@ error:
  *****************************************************************************/
 static void End( input_thread_t * p_input )
 {
-    int i;
-
     /* We are at the end */
     input_ChangeState( p_input, END_S );
 
@@ -1334,16 +1304,13 @@ static void End( input_thread_t * p_input )
     /* Stop es out activity */
     es_out_SetMode( p_input->p->p_es_out, ES_OUT_MODE_NONE );
 
-    /* Clean up master */
-    InputSourceClean( &p_input->p->input );
-
     /* Delete slave */
-    for( i = 0; i < p_input->p->i_slave; i++ )
-    {
-        InputSourceClean( p_input->p->slave[i] );
-        free( p_input->p->slave[i] );
-    }
+    for( int i = 0; i < p_input->p->i_slave; i++ )
+        InputSourceDestroy( p_input->p->slave[i] );
     free( p_input->p->slave );
+
+    /* Clean up master */
+    InputSourceDestroy( p_input->p->master );
 
     /* Unload all modules */
     if( p_input->p->p_es_out )
@@ -1386,7 +1353,7 @@ static void End( input_thread_t * p_input )
     vlc_mutex_lock( &p_input->p->p_item->lock );
     if( p_input->p->i_attachment > 0 )
     {
-        for( i = 0; i < p_input->p->i_attachment; i++ )
+        for( int i = 0; i < p_input->p->i_attachment; i++ )
             vlc_input_attachment_Delete( p_input->p->attachment[i] );
         TAB_CLEAN( p_input->p->i_attachment, p_input->p->attachment );
         free( p_input->p->attachment_demux);
@@ -1408,19 +1375,12 @@ static void End( input_thread_t * p_input )
 void input_ControlPush( input_thread_t *p_input,
                         int i_type, vlc_value_t *p_val )
 {
-    vlc_mutex_lock( &p_input->p->lock_control );
-    if( i_type == INPUT_CONTROL_SET_DIE )
-    {
-        /* Special case, empty the control */
-        for( int i = 0; i < p_input->p->i_control; i++ )
-        {
-            input_control_t *p_ctrl = &p_input->p->control[i];
-            ControlRelease( p_ctrl->i_type, p_ctrl->val );
-        }
-        p_input->p->i_control = 0;
-    }
+    input_thread_private_t *sys = p_input->p;
 
-    if( p_input->p->i_control >= INPUT_CONTROL_FIFO_SIZE )
+    vlc_mutex_lock( &sys->lock_control );
+    if( sys->is_stopped )
+        ;
+    else if( sys->i_control >= INPUT_CONTROL_FIFO_SIZE )
     {
         msg_Err( p_input, "input control fifo overflow, trashing type=%d",
                  i_type );
@@ -1436,10 +1396,10 @@ void input_ControlPush( input_thread_t *p_input,
         else
             memset( &c.val, 0, sizeof(c.val) );
 
-        p_input->p->control[p_input->p->i_control++] = c;
+        sys->control[sys->i_control++] = c;
     }
-    vlc_cond_signal( &p_input->p->wait_control );
-    vlc_mutex_unlock( &p_input->p->lock_control );
+    vlc_cond_signal( &sys->wait_control );
+    vlc_mutex_unlock( &sys->lock_control );
 }
 
 static int ControlGetReducedIndexLocked( input_thread_t *p_input )
@@ -1487,7 +1447,7 @@ static inline int ControlPop( input_thread_t *p_input,
     while( p_sys->i_control <= 0 ||
            ( b_postpone_seek && ControlIsSeekRequest( p_sys->control[0].i_type ) ) )
     {
-        if( !vlc_object_alive( p_input ) )
+        if( p_sys->is_stopped )
         {
             vlc_mutex_unlock( &p_sys->lock_control );
             return VLC_EGENERIC;
@@ -1539,6 +1499,7 @@ static bool ControlIsSeekRequest( int i_type )
     case INPUT_CONTROL_NAV_DOWN:
     case INPUT_CONTROL_NAV_LEFT:
     case INPUT_CONTROL_NAV_RIGHT:
+    case INPUT_CONTROL_NAV_POPUP:
         return true;
     default:
         return false;
@@ -1562,19 +1523,13 @@ static void ControlRelease( int i_type, vlc_value_t val )
 /* Pause input */
 static void ControlPause( input_thread_t *p_input, mtime_t i_control_date )
 {
-    int i_ret = VLC_SUCCESS;
     int i_state = PAUSE_S;
 
     if( p_input->p->b_can_pause )
     {
-        demux_t *p_demux = p_input->p->input.p_demux;
+        demux_t *p_demux = p_input->p->master->p_demux;
 
-        if( p_demux->s != NULL )
-            i_ret = stream_Control( p_demux->s, STREAM_SET_PAUSE_STATE, true );
-        else
-            i_ret = demux_Control( p_demux, DEMUX_SET_PAUSE_STATE, true );
-
-        if( i_ret )
+        if( demux_Control( p_demux, DEMUX_SET_PAUSE_STATE, true ) )
         {
             msg_Warn( p_input, "cannot set pause state" );
             return;
@@ -1582,10 +1537,8 @@ static void ControlPause( input_thread_t *p_input, mtime_t i_control_date )
     }
 
     /* */
-    i_ret = es_out_SetPauseState( p_input->p->p_es_out,
-                                  p_input->p->b_can_pause, true,
-                                  i_control_date );
-    if( i_ret )
+    if( es_out_SetPauseState( p_input->p->p_es_out, p_input->p->b_can_pause,
+                              true, i_control_date ) )
     {
         msg_Warn( p_input, "cannot set pause state at es_out level" );
         return;
@@ -1597,30 +1550,21 @@ static void ControlPause( input_thread_t *p_input, mtime_t i_control_date )
 
 static void ControlUnpause( input_thread_t *p_input, mtime_t i_control_date )
 {
-    int i_ret = VLC_SUCCESS;
-
     if( p_input->p->b_can_pause )
     {
-        demux_t *p_demux = p_input->p->input.p_demux;
+        demux_t *p_demux = p_input->p->master->p_demux;
 
-        if( p_demux->s != NULL )
-            i_ret = stream_Control( p_demux->s, STREAM_SET_PAUSE_STATE, false );
-        else
-            i_ret = demux_Control( p_demux, DEMUX_SET_PAUSE_STATE, false );
-        if( i_ret )
+        if( demux_Control( p_demux, DEMUX_SET_PAUSE_STATE, false ) )
         {
-            /* FIXME What to do ? */
-            msg_Warn( p_input, "cannot unset pause -> EOF" );
-            input_ControlPush( p_input, INPUT_CONTROL_SET_DIE, NULL );
+            msg_Err( p_input, "cannot resume" );
+            input_ChangeState( p_input, ERROR_S );
+            return;
         }
     }
 
     /* Switch to play */
     input_ChangeState( p_input, PLAYING_S );
-
-    /* */
-    if( !i_ret )
-        es_out_SetPauseState( p_input->p->p_es_out, false, false, i_control_date );
+    es_out_SetPauseState( p_input->p->p_es_out, false, false, i_control_date );
 }
 
 static bool Control( input_thread_t *p_input,
@@ -1635,13 +1579,6 @@ static bool Control( input_thread_t *p_input,
 
     switch( i_type )
     {
-        case INPUT_CONTROL_SET_DIE:
-            msg_Dbg( p_input, "control: stopping input" );
-
-            /* Mark all submodules to die */
-            ObjectKillChildrens( VLC_OBJECT(p_input) );
-            break;
-
         case INPUT_CONTROL_SET_POSITION:
         {
             if( p_input->p->b_recording )
@@ -1657,7 +1594,7 @@ static bool Control( input_thread_t *p_input,
                 f_pos = 1.f;
             /* Reset the decoders states and clock sync (before calling the demuxer */
             es_out_SetTime( p_input->p->p_es_out, -1 );
-            if( demux_Control( p_input->p->input.p_demux, DEMUX_SET_POSITION,
+            if( demux_Control( p_input->p->master->p_demux, DEMUX_SET_POSITION,
                                (double) f_pos, !p_input->p->b_fast_seek ) )
             {
                 msg_Err( p_input, "INPUT_CONTROL_SET_POSITION(_OFFSET) "
@@ -1667,7 +1604,7 @@ static bool Control( input_thread_t *p_input,
             {
                 if( p_input->p->i_slave > 0 )
                     SlaveSeek( p_input );
-                p_input->p->input.b_eof = false;
+                p_input->p->master->b_eof = false;
 
                 b_force_update = true;
             }
@@ -1685,14 +1622,14 @@ static bool Control( input_thread_t *p_input,
                 break;
             }
 
-            i_time = val.i_time;
+            i_time = val.i_int;
             if( i_time < 0 )
                 i_time = 0;
 
             /* Reset the decoders states and clock sync (before calling the demuxer */
             es_out_SetTime( p_input->p->p_es_out, -1 );
 
-            i_ret = demux_Control( p_input->p->input.p_demux,
+            i_ret = demux_Control( p_input->p->master->p_demux,
                                    DEMUX_SET_TIME, i_time,
                                    !p_input->p->b_fast_seek );
             if( i_ret )
@@ -1700,11 +1637,11 @@ static bool Control( input_thread_t *p_input,
                 int64_t i_length;
 
                 /* Emulate it with a SET_POS */
-                if( !demux_Control( p_input->p->input.p_demux,
+                if( !demux_Control( p_input->p->master->p_demux,
                                     DEMUX_GET_LENGTH, &i_length ) && i_length > 0 )
                 {
                     double f_pos = (double)i_time / (double)i_length;
-                    i_ret = demux_Control( p_input->p->input.p_demux,
+                    i_ret = demux_Control( p_input->p->master->p_demux,
                                             DEMUX_SET_POSITION, f_pos,
                                             !p_input->p->b_fast_seek );
                 }
@@ -1718,7 +1655,7 @@ static bool Control( input_thread_t *p_input,
             {
                 if( p_input->p->i_slave > 0 )
                     SlaveSeek( p_input );
-                p_input->p->input.b_eof = false;
+                p_input->p->master->b_eof = false;
 
                 b_force_update = true;
             }
@@ -1768,7 +1705,7 @@ static bool Control( input_thread_t *p_input,
             /* Apply direction */
             if( i_rate_sign < 0 )
             {
-                if( p_input->p->input.b_rescale_ts )
+                if( p_input->p->master->b_rescale_ts )
                 {
                     msg_Dbg( p_input, "cannot set negative rate" );
                     i_rate = p_input->p->i_rate;
@@ -1781,7 +1718,7 @@ static bool Control( input_thread_t *p_input,
             }
 
             if( i_rate != INPUT_RATE_DEFAULT &&
-                ( ( !p_input->p->b_can_rate_control && !p_input->p->input.b_rescale_ts ) ||
+                ( ( !p_input->p->b_can_rate_control && !p_input->p->master->b_rescale_ts ) ||
                   ( p_input->p->p_sout && !p_input->p->b_out_pace_control ) ) )
             {
                 msg_Dbg( p_input, "cannot change rate" );
@@ -1790,16 +1727,16 @@ static bool Control( input_thread_t *p_input,
             if( i_rate != p_input->p->i_rate &&
                 !p_input->p->b_can_pace_control && p_input->p->b_can_rate_control )
             {
-                demux_t *p_demux = p_input->p->input.p_demux;
+                demux_t *p_demux = p_input->p->master->p_demux;
                 int i_ret = VLC_EGENERIC;
 
                 if( p_demux->s == NULL )
                 {
-                    if( !p_input->p->input.b_rescale_ts )
+                    if( !p_input->p->master->b_rescale_ts )
                         es_out_Control( p_input->p->p_es_out, ES_OUT_RESET_PCR );
 
-                    i_ret = demux_Control( p_input->p->input.p_demux,
-                                            DEMUX_SET_RATE, &i_rate );
+                    i_ret = demux_Control( p_input->p->master->p_demux,
+                                           DEMUX_SET_RATE, &i_rate );
                 }
                 if( i_ret )
                 {
@@ -1814,7 +1751,7 @@ static bool Control( input_thread_t *p_input,
                 p_input->p->i_rate = i_rate;
                 input_SendEventRate( p_input, i_rate );
 
-                if( p_input->p->input.b_rescale_ts )
+                if( p_input->p->master->b_rescale_ts )
                 {
                     const int i_rate_source = (p_input->p->b_can_pace_control || p_input->p->b_can_rate_control ) ? i_rate : INPUT_RATE_DEFAULT;
                     es_out_SetRate( p_input->p->p_es_out, i_rate_source, i_rate );
@@ -1830,7 +1767,7 @@ static bool Control( input_thread_t *p_input,
             es_out_Control( p_input->p->p_es_out,
                             ES_OUT_SET_GROUP, val.i_int );
 
-            demux_Control( p_input->p->input.p_demux, DEMUX_SET_GROUP, val.i_int,
+            demux_Control( p_input->p->master->p_demux, DEMUX_SET_GROUP, val.i_int,
                             NULL );
             break;
 
@@ -1839,7 +1776,7 @@ static bool Control( input_thread_t *p_input,
             es_out_Control( p_input->p->p_es_out_display,
                             ES_OUT_SET_ES_BY_ID, (int)val.i_int );
 
-            demux_Control( p_input->p->input.p_demux, DEMUX_SET_ES, (int)val.i_int );
+            demux_Control( p_input->p->master->p_demux, DEMUX_SET_ES, (int)val.i_int );
             break;
 
         case INPUT_CONTROL_RESTART_ES:
@@ -1848,12 +1785,12 @@ static bool Control( input_thread_t *p_input,
             break;
 
         case INPUT_CONTROL_SET_AUDIO_DELAY:
-            input_SendEventAudioDelay( p_input, val.i_time );
+            input_SendEventAudioDelay( p_input, val.i_int );
             UpdatePtsDelay( p_input );
             break;
 
         case INPUT_CONTROL_SET_SPU_DELAY:
-            input_SendEventSubtitleDelay( p_input, val.i_time );
+            input_SendEventSubtitleDelay( p_input, val.i_int );
             UpdatePtsDelay( p_input );
             break;
 
@@ -1866,21 +1803,21 @@ static bool Control( input_thread_t *p_input,
                 msg_Err( p_input, "INPUT_CONTROL_SET_TITLE(*) ignored while recording" );
                 break;
             }
-            if( p_input->p->input.i_title <= 0 )
+            if( p_input->p->master->i_title <= 0 )
                 break;
 
-            int i_title = p_input->p->input.p_demux->info.i_title;
+            int i_title = p_input->p->master->p_demux->info.i_title;
             if( i_type == INPUT_CONTROL_SET_TITLE_PREV )
                 i_title--;
             else if( i_type == INPUT_CONTROL_SET_TITLE_NEXT )
                 i_title++;
             else
                 i_title = val.i_int;
-            if( i_title < 0 || i_title >= p_input->p->input.i_title )
+            if( i_title < 0 || i_title >= p_input->p->master->i_title )
                 break;
 
             es_out_SetTime( p_input->p->p_es_out, -1 );
-            demux_Control( p_input->p->input.p_demux,
+            demux_Control( p_input->p->master->p_demux,
                            DEMUX_SET_TITLE, i_title );
             input_SendEventTitle( p_input, i_title );
             break;
@@ -1894,18 +1831,18 @@ static bool Control( input_thread_t *p_input,
                 msg_Err( p_input, "INPUT_CONTROL_SET_SEEKPOINT(*) ignored while recording" );
                 break;
             }
-            if( p_input->p->input.i_title <= 0 )
+            if( p_input->p->master->i_title <= 0 )
                 break;
 
-            demux_t *p_demux = p_input->p->input.p_demux;
+            demux_t *p_demux = p_input->p->master->p_demux;
 
             int i_title = p_demux->info.i_title;
             int i_seekpoint = p_demux->info.i_seekpoint;
 
             if( i_type == INPUT_CONTROL_SET_SEEKPOINT_PREV )
             {
-                int64_t i_seekpoint_time = p_input->p->input.title[i_title]->seekpoint[i_seekpoint]->i_time_offset;
-                int64_t i_input_time = var_GetTime( p_input, "time" );
+                int64_t i_seekpoint_time = p_input->p->master->title[i_title]->seekpoint[i_seekpoint]->i_time_offset;
+                int64_t i_input_time = var_GetInteger( p_input, "time" );
                 if( i_seekpoint_time >= 0 && i_input_time >= 0 )
                 {
                     if( i_input_time < i_seekpoint_time + 3000000 )
@@ -1919,11 +1856,11 @@ static bool Control( input_thread_t *p_input,
             else
                 i_seekpoint = val.i_int;
             if( i_seekpoint < 0
-             || i_seekpoint >= p_input->p->input.title[i_title]->i_seekpoint )
+             || i_seekpoint >= p_input->p->master->title[i_title]->i_seekpoint )
                 break;
 
             es_out_SetTime( p_input->p->p_es_out, -1 );
-            demux_Control( p_input->p->input.p_demux,
+            demux_Control( p_input->p->master->p_demux,
                            DEMUX_SET_SEEKPOINT, i_seekpoint );
             input_SendEventSeekpoint( p_input, i_title, i_seekpoint );
             break;
@@ -1931,59 +1868,56 @@ static bool Control( input_thread_t *p_input,
 
         case INPUT_CONTROL_ADD_SUBTITLE:
             if( val.psz_string )
-                input_SubtitleFileAdd( p_input, val.psz_string, true );
+                input_SubtitleFileAdd( p_input, val.psz_string, SUB_FORCED, true );
             break;
 
         case INPUT_CONTROL_ADD_SLAVE:
             if( val.psz_string )
             {
                 const char *uri = val.psz_string;
-                input_source_t *slave = InputSourceNew( p_input );
-
-                if( slave && !InputSourceInit( p_input, slave, uri, NULL, false ) )
+                input_source_t *slave = InputSourceNew( p_input, uri, NULL,
+                                                        false );
+                if( slave == NULL )
                 {
-                    int64_t i_time;
-
-                    /* Add the slave */
-                    msg_Dbg( p_input, "adding %s as slave on the fly", uri );
-
-                    /* Set position */
-                    if( demux_Control( p_input->p->input.p_demux,
-                                        DEMUX_GET_TIME, &i_time ) )
-                    {
-                        msg_Err( p_input, "demux doesn't like DEMUX_GET_TIME" );
-                        InputSourceClean( slave );
-                        free( slave );
-                        break;
-                    }
-                    if( demux_Control( slave->p_demux,
-                                       DEMUX_SET_TIME, i_time, true ) )
-                    {
-                        msg_Err( p_input, "seek failed for new slave" );
-                        InputSourceClean( slave );
-                        free( slave );
-                        break;
-                    }
-
-                    /* Get meta (access and demux) */
-                    InputUpdateMeta( p_input, slave->p_demux );
-
-                    TAB_APPEND( p_input->p->i_slave, p_input->p->slave, slave );
-                }
-                else
-                {
-                    free( slave );
                     msg_Warn( p_input, "failed to add %s as slave", uri );
+                    break;
                 }
+
+                int64_t i_time;
+
+                /* Add the slave */
+                msg_Dbg( p_input, "adding %s as slave on the fly", uri );
+
+                /* Set position */
+                if( demux_Control( p_input->p->master->p_demux,
+                                   DEMUX_GET_TIME, &i_time ) )
+                {
+                    msg_Err( p_input, "demux doesn't like DEMUX_GET_TIME" );
+                    InputSourceDestroy( slave );
+                    break;
+                }
+
+                if( demux_Control( slave->p_demux,
+                                   DEMUX_SET_TIME, i_time, true ) )
+                {
+                    msg_Err( p_input, "seek failed for new slave" );
+                    InputSourceDestroy( slave );
+                    break;
+                }
+
+                /* Get meta (access and demux) */
+                InputUpdateMeta( p_input, slave->p_demux );
+
+                TAB_APPEND( p_input->p->i_slave, p_input->p->slave, slave );
             }
             break;
 
         case INPUT_CONTROL_SET_RECORD_STATE:
             if( !!p_input->p->b_recording != !!val.b_bool )
             {
-                if( p_input->p->input.b_can_stream_record )
+                if( p_input->p->master->b_can_stream_record )
                 {
-                    if( demux_Control( p_input->p->input.p_demux,
+                    if( demux_Control( p_input->p->master->p_demux,
                                        DEMUX_SET_RECORD_STATE, val.b_bool ) )
                         val.b_bool = false;
                 }
@@ -2034,7 +1968,7 @@ static bool Control( input_thread_t *p_input,
                 break;
             }
 
-            val.i_time = time_offset;
+            val.i_int = time_offset;
             b_force_update = Control( p_input, INPUT_CONTROL_SET_TIME, val );
             break;
         }
@@ -2044,7 +1978,8 @@ static bool Control( input_thread_t *p_input,
         case INPUT_CONTROL_NAV_DOWN:
         case INPUT_CONTROL_NAV_LEFT:
         case INPUT_CONTROL_NAV_RIGHT:
-            demux_Control( p_input->p->input.p_demux, i_type
+        case INPUT_CONTROL_NAV_POPUP:
+            demux_Control( p_input->p->master->p_demux, i_type
                            - INPUT_CONTROL_NAV_ACTIVATE + DEMUX_NAV_ACTIVATE );
             break;
 
@@ -2063,10 +1998,10 @@ static bool Control( input_thread_t *p_input,
 static int UpdateTitleSeekpoint( input_thread_t *p_input,
                                  int i_title, int i_seekpoint )
 {
-    int i_title_end = p_input->p->input.i_title_end -
-                        p_input->p->input.i_title_offset;
-    int i_seekpoint_end = p_input->p->input.i_seekpoint_end -
-                            p_input->p->input.i_seekpoint_offset;
+    int i_title_end = p_input->p->master->i_title_end -
+                        p_input->p->master->i_title_offset;
+    int i_seekpoint_end = p_input->p->master->i_seekpoint_end -
+                            p_input->p->master->i_seekpoint_offset;
 
     if( i_title_end >= 0 && i_seekpoint_end >= 0 )
     {
@@ -2091,7 +2026,7 @@ static int UpdateTitleSeekpoint( input_thread_t *p_input,
  *****************************************************************************/
 static int UpdateTitleSeekpointFromDemux( input_thread_t *p_input )
 {
-    demux_t *p_demux = p_input->p->input.p_demux;
+    demux_t *p_demux = p_input->p->master->p_demux;
 
     /* TODO event-like */
     if( p_demux->info.i_update & INPUT_UPDATE_TITLE )
@@ -2108,17 +2043,14 @@ static int UpdateTitleSeekpointFromDemux( input_thread_t *p_input )
         p_demux->info.i_update &= ~INPUT_UPDATE_SEEKPOINT;
     }
 
-    /* Hmmm only works with master input */
-    if( p_input->p->input.p_demux == p_demux )
-        return UpdateTitleSeekpoint( p_input,
-                                     p_demux->info.i_title,
-                                     p_demux->info.i_seekpoint );
-    return 1;
+    return UpdateTitleSeekpoint( p_input,
+                                 p_demux->info.i_title,
+                                 p_demux->info.i_seekpoint );
 }
 
 static void UpdateGenericFromDemux( input_thread_t *p_input )
 {
-    demux_t *p_demux = p_input->p->input.p_demux;
+    demux_t *p_demux = p_input->p->master->p_demux;
 
     if( p_demux->info.i_update & INPUT_UPDATE_META )
     {
@@ -2136,7 +2068,7 @@ static void UpdateGenericFromDemux( input_thread_t *p_input )
 
 static void UpdateTitleListfromDemux( input_thread_t *p_input )
 {
-    input_source_t *in = &p_input->p->input;
+    input_source_t *in = p_input->p->master;
 
     /* Delete the preexisting titles */
     if( in->i_title > 0 )
@@ -2162,82 +2094,122 @@ static void UpdateTitleListfromDemux( input_thread_t *p_input )
 /*****************************************************************************
  * InputSourceNew:
  *****************************************************************************/
-static input_source_t *InputSourceNew( input_thread_t *p_input )
+static input_source_t *InputSourceNew( input_thread_t *p_input,
+                                       const char *psz_mrl,
+                                       const char *psz_forced_demux,
+                                       bool b_in_can_fail )
 {
-    VLC_UNUSED(p_input);
+    input_source_t *in = vlc_custom_create( p_input, sizeof( *in ),
+                                            "input source" );
+    if( unlikely(in == NULL) )
+        return NULL;
 
-    return calloc( 1,  sizeof( input_source_t ) );
-}
-
-/*****************************************************************************
- * InputSourceInit:
- *****************************************************************************/
-static int InputSourceInit( input_thread_t *p_input,
-                            input_source_t *in, const char *psz_mrl,
-                            const char *psz_forced_demux, bool b_in_can_fail )
-{
     const char *psz_access, *psz_demux, *psz_path, *psz_anchor = NULL;
-    char *psz_var_demux = NULL;
-    double f_fps;
 
     assert( psz_mrl );
     char *psz_dup = strdup( psz_mrl );
 
     if( psz_dup == NULL )
-        goto error;
+    {
+        free( in );
+        return NULL;
+    }
 
     /* Split uri */
     input_SplitMRL( &psz_access, &psz_demux, &psz_path, &psz_anchor, psz_dup );
 
+    if( psz_forced_demux != NULL )
+        psz_demux = psz_forced_demux;
+
     msg_Dbg( p_input, "`%s' gives access `%s' demux `%s' path `%s'",
              psz_mrl, psz_access, psz_demux, psz_path );
-    if( !p_input->b_preparsing )
-    {
-        /* Find optional titles and seekpoints */
-        MRLSections( psz_anchor, &in->i_title_start, &in->i_title_end,
-                     &in->i_seekpoint_start, &in->i_seekpoint_end );
-        if( psz_forced_demux && *psz_forced_demux )
-        {
-            psz_demux = psz_forced_demux;
-        }
-        else if( *psz_demux == '\0' )
-        {
-            /* special hack for forcing a demuxer with --demux=module
-             * (and do nothing with a list) */
-            psz_var_demux = var_GetNonEmptyString( p_input, "demux" );
-            psz_demux = psz_var_demux;
-            msg_Dbg( p_input, "specified demux `%s'", psz_demux );
-        }
 
-        /* Try access_demux first */
-        in->p_demux = demux_New( p_input, p_input, psz_access, psz_demux,
-                                 psz_path, NULL, p_input->p->p_es_out, false );
-    }
-    else
-    {
-        if( *psz_demux )
-            goto error;
-        msg_Dbg( p_input, "trying to pre-parse %s",  psz_path );
+    /* Find optional titles and seekpoints */
+    MRLSections( psz_anchor, &in->i_title_start, &in->i_title_end,
+                 &in->i_seekpoint_start, &in->i_seekpoint_end );
+
+    if( p_input->p->master == NULL /* XXX ugly */)
+    {   /* On master stream only, use input-list */
+        char *str = var_InheritString( p_input, "input-list" );
+        if( str != NULL )
+        {
+            char *list;
+
+            var_Create( p_input, "concat-list", VLC_VAR_STRING );
+            if( likely(asprintf( &list, "%s://%s,%s", psz_access, psz_path,
+                                 str ) >= 0) )
+            {
+                 var_SetString( p_input, "concat-list", list );
+                 free( list );
+            }
+            free( str );
+            psz_access = "concat";
+        }
     }
 
-    mtime_t i_pts_delay;
+    if( strcasecmp( psz_access, "concat" ) )
+    {   /* Autodetect extra files if none specified */
+        int count;
+        char **tab;
 
-    if( in->p_demux )
-    {
-        /* Get infos from access_demux */
-        in->b_title_demux = true;
-        if( demux_Control( in->p_demux, DEMUX_GET_TITLE_INFO,
-                            &in->title, &in->i_title,
-                            &in->i_title_offset, &in->i_seekpoint_offset ) )
+        TAB_INIT( count, tab );
+        InputGetExtraFiles( p_input, &count, &tab, psz_access, psz_path );
+        if( count > 0 )
         {
-            TAB_INIT( in->i_title, in->title );
+            char *list = NULL;
+
+            for( int i = 0; i < count; i++ )
+            {
+                char *str;
+                if( asprintf( &str, "%s,%s", list ? list : psz_mrl,
+                              tab[i] ) < 0 )
+                    break;
+
+                free( tab[i] );
+                free( list );
+                list = str;
+            }
+
+            var_Create( p_input, "concat-list", VLC_VAR_STRING );
+            if( likely(list != NULL) )
+            {
+                var_SetString( p_input, "concat-list", list );
+                free( list );
+            }
+            psz_access = "concat";
         }
-        if( demux_Control( in->p_demux, DEMUX_CAN_CONTROL_PACE,
-                            &in->b_can_pace_control ) )
-            in->b_can_pace_control = false;
+        TAB_CLEAN( count, tab );
+    }
 
-        assert( in->p_demux->pf_demux != NULL || !in->b_can_pace_control );
+    in->p_demux = input_DemuxNew( VLC_OBJECT(in), psz_access, psz_demux,
+                                  psz_path, p_input->p->p_es_out,
+                                  p_input->b_preparsing, p_input );
+    free( psz_dup );
 
+    if( in->p_demux == NULL )
+    {
+        if( !b_in_can_fail && !input_Stopped( p_input ) )
+            vlc_dialog_display_error( p_input, _("Your input can't be opened"),
+                                      _("VLC is unable to open the MRL '%s'."
+                                      " Check the log for details."), psz_mrl );
+        vlc_object_release( in );
+        return NULL;
+    }
+
+    /* Get infos from (access_)demux */
+    bool b_can_seek;
+    if( demux_Control( in->p_demux, DEMUX_CAN_SEEK, &b_can_seek ) )
+        b_can_seek = false;
+    var_SetBool( p_input, "can-seek", b_can_seek );
+
+    if( demux_Control( in->p_demux, DEMUX_CAN_CONTROL_PACE,
+                       &in->b_can_pace_control ) )
+        in->b_can_pace_control = false;
+
+    assert( in->p_demux->pf_demux != NULL || !in->b_can_pace_control );
+
+    if( in->p_demux->s != NULL )
+    {
         if( !in->b_can_pace_control )
         {
             if( demux_Control( in->p_demux, DEMUX_CAN_CONTROL_RATE,
@@ -2252,168 +2224,18 @@ static int InputSourceInit( input_thread_t *p_input,
             in->b_can_rate_control = true;
             in->b_rescale_ts = true;
         }
-        if( demux_Control( in->p_demux, DEMUX_CAN_PAUSE,
-                            &in->b_can_pause ) )
-            in->b_can_pause = false;
-        var_SetBool( p_input, "can-pause", in->b_can_pause || !in->b_can_pace_control ); /* XXX temporary because of es_out_timeshift*/
-        var_SetBool( p_input, "can-rate", !in->b_can_pace_control || in->b_can_rate_control ); /* XXX temporary because of es_out_timeshift*/
-        var_SetBool( p_input, "can-rewind", !in->b_rescale_ts && !in->b_can_pace_control && in->b_can_rate_control );
-
-        bool b_can_seek;
-        if( demux_Control( in->p_demux, DEMUX_CAN_SEEK, &b_can_seek ) )
-            b_can_seek = false;
-        var_SetBool( p_input, "can-seek", b_can_seek );
     }
     else
-    {   /* Now try a real access */
-        access_t *p_access = access_New( p_input, p_input,
-                                         psz_access, psz_demux, psz_path );
-        if( p_access == NULL )
-        {
-            if( vlc_object_alive( p_input ) )
-            {
-                msg_Err( p_input, "open of `%s' failed", psz_mrl );
-                if( !b_in_can_fail )
-                    dialog_Fatal( p_input, _("Your input can't be opened"),
-                                   _("VLC is unable to open the MRL '%s'."
-                                     " Check the log for details."), psz_mrl );
-            }
-            goto error;
-        }
-
-        /* Access-forced demuxer (PARENTAL ADVISORY: EXPLICIT HACK) */
-        if( !psz_demux[0] || !strcasecmp( psz_demux, "any" ) )
-            psz_demux = p_access->psz_demux;
-
-        /* */
-        int  i_input_list;
-        char **ppsz_input_list;
-
-        TAB_INIT( i_input_list, ppsz_input_list );
-
-        /* On master stream only, use input-list */
-        if( &p_input->p->input == in )
-        {
-            char *psz_list;
-            char *psz_parser;
-
-            psz_list =
-            psz_parser = var_CreateGetNonEmptyString( p_input, "input-list" );
-
-            while( psz_parser && *psz_parser )
-            {
-                char *p = strchr( psz_parser, ',' );
-                if( p )
-                    *p++ = '\0';
-
-                if( *psz_parser )
-                {
-                    char *psz_name = strdup( psz_parser );
-                    if( psz_name )
-                        TAB_APPEND( i_input_list, ppsz_input_list, psz_name );
-                }
-
-                psz_parser = p;
-            }
-            free( psz_list );
-        }
-        /* Autodetect extra files if none specified */
-        if( i_input_list <= 0 )
-        {
-            InputGetExtraFiles( p_input, &i_input_list, &ppsz_input_list,
-                                psz_access, psz_path );
-        }
-        if( i_input_list > 0 )
-            TAB_APPEND( i_input_list, ppsz_input_list, NULL );
-
-        /* Create the stream_t */
-        stream_t *p_stream = stream_AccessNew( p_access, ppsz_input_list );
-        if( ppsz_input_list )
-        {
-            for( int i = 0; ppsz_input_list[i] != NULL; i++ )
-                free( ppsz_input_list[i] );
-            TAB_CLEAN( i_input_list, ppsz_input_list );
-        }
-
-        if( p_stream == NULL )
-        {
-            msg_Warn( p_input, "cannot create a stream_t from access" );
-            goto error;
-        }
-
-        /* Add stream filters */
-        char *psz_stream_filter = var_GetNonEmptyString( p_input,
-                                                         "stream-filter" );
-        p_stream = stream_FilterChainNew( p_stream, psz_stream_filter,
-                               var_GetBool( p_input, "input-record-native" ) );
-        free( psz_stream_filter );
-
-        if( !p_input->b_preparsing )
-        {
-            bool b;
-
-            stream_Control( p_stream, STREAM_CAN_CONTROL_PACE,
-                            &in->b_can_pace_control );
-            in->b_can_rate_control = in->b_can_pace_control;
-            in->b_rescale_ts = true;
-
-            stream_Control( p_stream, STREAM_CAN_PAUSE, &in->b_can_pause );
-            var_SetBool( p_input, "can-pause",
-                         in->b_can_pause || !in->b_can_pace_control ); /* XXX temporary because of es_out_timeshift*/
-            var_SetBool( p_input, "can-rate",
-                         !in->b_can_pace_control || in->b_can_rate_control ); /* XXX temporary because of es_out_timeshift*/
-            var_SetBool( p_input, "can-rewind",
-                         !in->b_rescale_ts && !in->b_can_pace_control );
-
-            stream_Control( p_stream, STREAM_CAN_SEEK, &b );
-            var_SetBool( p_input, "can-seek", b );
-
-            in->b_title_demux = false;
-
-            stream_Control( p_stream, STREAM_GET_PTS_DELAY, &i_pts_delay );
-        }
-
-        in->p_demux = demux_New( p_input, p_input, psz_access, psz_demux,
-                   /* Take access/stream redirections into account: */
-                            p_stream->psz_path ? p_stream->psz_path : psz_path,
-                                 p_stream, p_input->p->p_es_out,
-                                 p_input->b_preparsing );
-
-        if( in->p_demux == NULL )
-        {
-            if( vlc_object_alive( p_input ) )
-            {
-                msg_Err( p_input, "no suitable demux module for `%s/%s://%s'",
-                         psz_access, psz_demux, psz_path );
-                if( !b_in_can_fail )
-                    dialog_Fatal( VLC_OBJECT( p_input ),
-                                  _("VLC can't recognize the input's format"),
-                                  _("The format of '%s' cannot be detected. "
-                                    "Have a look at the log for details."), psz_mrl );
-            }
-            stream_Delete( p_stream );
-            goto error;
-        }
-        assert( in->p_demux->pf_demux != NULL );
-
-        /* Get title from demux */
-        if( !p_input->b_preparsing && in->i_title <= 0 )
-        {
-            if( demux_Control( in->p_demux, DEMUX_GET_TITLE_INFO,
-                                &in->title, &in->i_title,
-                                &in->i_title_offset, &in->i_seekpoint_offset ))
-            {
-                TAB_INIT( in->i_title, in->title );
-            }
-            else
-            {
-                in->b_title_demux = true;
-            }
-        }
+    {
+        in->b_can_rate_control = in->b_can_pace_control;
+        in->b_rescale_ts = true;
     }
 
-    free( psz_var_demux );
-    free( psz_dup );
+    demux_Control( in->p_demux, DEMUX_CAN_PAUSE, &in->b_can_pause );
+
+    var_SetBool( p_input, "can-pause", in->b_can_pause || !in->b_can_pace_control ); /* XXX temporary because of es_out_timeshift*/
+    var_SetBool( p_input, "can-rate", !in->b_can_pace_control || in->b_can_rate_control ); /* XXX temporary because of es_out_timeshift*/
+    var_SetBool( p_input, "can-rewind", !in->b_rescale_ts && !in->b_can_pace_control && in->b_can_rate_control );
 
     /* Set record capabilities */
     if( demux_Control( in->p_demux, DEMUX_CAN_RECORD, &in->b_can_stream_record ) )
@@ -2430,6 +2252,17 @@ static int InputSourceInit( input_thread_t *p_input,
      * FIXME improve for b_preparsing: move it after GET_META and check psz_arturl */
     if( !p_input->b_preparsing )
     {
+        if( demux_Control( in->p_demux, DEMUX_GET_TITLE_INFO,
+                           &in->title, &in->i_title,
+                           &in->i_title_offset, &in->i_seekpoint_offset ))
+        {
+            TAB_INIT( in->i_title, in->title );
+        }
+        else
+        {
+            in->b_title_demux = true;
+        }
+
         int i_attachment;
         input_attachment_t **attachment;
         if( !demux_Control( in->p_demux, DEMUX_GET_ATTACHMENTS,
@@ -2441,44 +2274,26 @@ static int InputSourceInit( input_thread_t *p_input,
             vlc_mutex_unlock( &p_input->p->p_item->lock );
         }
 
-        /* PTS delay: request from demux first. This is required for
-         * access_demux and some special cases like SDP demux. Otherwise,
-         * fallback to access */
-        if( demux_Control( in->p_demux, DEMUX_GET_PTS_DELAY,
-                           &in->i_pts_delay ) )
-            in->i_pts_delay = i_pts_delay;
+        demux_Control( in->p_demux, DEMUX_GET_PTS_DELAY, &in->i_pts_delay );
         if( in->i_pts_delay > INPUT_PTS_DELAY_MAX )
             in->i_pts_delay = INPUT_PTS_DELAY_MAX;
         else if( in->i_pts_delay < 0 )
             in->i_pts_delay = 0;
     }
 
-    if( !demux_Control( in->p_demux, DEMUX_GET_FPS, &f_fps ) && f_fps > 0.0 )
-    {
-        vlc_mutex_lock( &p_input->p->p_item->lock );
-        p_input->p->f_fps = f_fps;
-        vlc_mutex_unlock( &p_input->p->p_item->lock );
-    }
+    if( demux_Control( in->p_demux, DEMUX_GET_FPS, &in->f_fps ) )
+        in->f_fps = 0.f;
 
     if( var_GetInteger( p_input, "clock-synchro" ) != -1 )
         in->b_can_pace_control = !var_GetInteger( p_input, "clock-synchro" );
 
-    return VLC_SUCCESS;
-
-error:
-    if( in->p_demux )
-        demux_Delete( in->p_demux );
-
-    free( psz_var_demux );
-    free( psz_dup );
-
-    return VLC_EGENERIC;
+    return in;
 }
 
 /*****************************************************************************
- * InputSourceClean:
+ * InputSourceDestroy:
  *****************************************************************************/
-static void InputSourceClean( input_source_t *in )
+static void InputSourceDestroy( input_source_t *in )
 {
     int i;
 
@@ -2491,6 +2306,8 @@ static void InputSourceClean( input_source_t *in )
             vlc_input_title_Delete( in->title[i] );
         TAB_CLEAN( in->i_title, in->title );
     }
+
+    vlc_object_release( in );
 }
 
 /*****************************************************************************
@@ -2520,10 +2337,9 @@ static void InputSourceMeta( input_thread_t *p_input,
         return;
 
     demux_meta_t *p_demux_meta =
-        vlc_custom_create( p_demux, sizeof( *p_demux_meta ), "demux meta" );
-    if( !p_demux_meta )
+        vlc_custom_create( p_source, sizeof( *p_demux_meta ), "demux meta" );
+    if( unlikely(p_demux_meta == NULL) )
         return;
-    p_demux_meta->p_demux = p_demux;
     p_demux_meta->p_item = p_input->p->p_item;
 
     module_t *p_id3 = module_need( p_demux_meta, "meta reader", NULL, false );
@@ -2553,7 +2369,7 @@ static void SlaveDemux( input_thread_t *p_input )
     int64_t i_time;
     int i;
 
-    if( demux_Control( p_input->p->input.p_demux, DEMUX_GET_TIME, &i_time ) )
+    if( demux_Control( p_input->p->master->p_demux, DEMUX_GET_TIME, &i_time ) )
     {
         msg_Err( p_input, "demux doesn't like DEMUX_GET_TIME" );
         return;
@@ -2609,7 +2425,7 @@ static void SlaveSeek( input_thread_t *p_input )
     int64_t i_time;
     int i;
 
-    if( demux_Control( p_input->p->input.p_demux, DEMUX_GET_TIME, &i_time ) )
+    if( demux_Control( p_input->p->master->p_demux, DEMUX_GET_TIME, &i_time ) )
     {
         msg_Err( p_input, "demux doesn't like DEMUX_GET_TIME" );
         return;
@@ -2828,19 +2644,13 @@ static void InputGetExtraFiles( input_thread_t *p_input,
 /* */
 static void input_ChangeState( input_thread_t *p_input, int i_state )
 {
-    const bool b_changed = p_input->p->i_state != i_state;
+    if( p_input->p->i_state == i_state )
+        return;
 
     p_input->p->i_state = i_state;
     if( i_state == ERROR_S )
-        p_input->b_error = true;
-    else if( i_state == END_S )
-        p_input->b_eof = true;
-
-    if( b_changed )
-    {
-        input_item_SetErrorWhenReading( p_input->p->p_item, p_input->b_error );
-        input_SendEventState( p_input, i_state );
-    }
+        input_item_SetErrorWhenReading( p_input->p->p_item, true );
+    input_SendEventState( p_input, i_state );
 }
 
 
@@ -2968,20 +2778,15 @@ static void MRLSections( const char *p,
 static void input_SubtitleAdd( input_thread_t *p_input,
                                const char *url, unsigned i_flags )
 {
-    input_source_t *sub = InputSourceNew( p_input );
-    if( sub == NULL )
-        return;
-
     vlc_value_t count;
 
     var_Change( p_input, "spu-es", VLC_VAR_CHOICESCOUNT, &count, NULL );
 
-    if( InputSourceInit( p_input, sub, url, "subtitle",
-                         (i_flags & SUB_CANFAIL) ) )
-    {
-        free( sub );
+    input_source_t *sub = InputSourceNew( p_input, url, "subtitle",
+                                          (i_flags & SUB_CANFAIL) );
+    if( sub == NULL )
         return;
-    }
+
     TAB_APPEND( p_input->p->i_slave, p_input->p->slave, sub );
 
     if( !(i_flags & SUB_FORCED) )
@@ -3006,32 +2811,35 @@ static void input_SubtitleAdd( input_thread_t *p_input,
     var_FreeList( &list, NULL );
 }
 
-static void input_SubtitleFileAdd( input_thread_t *p_input, char *psz_subtitle,
-                                   unsigned i_flags )
+static void input_SubtitleFileAdd( input_thread_t *p_input,
+                                   const char *psz_subtitle, unsigned i_flags,
+                                   bool b_check_idx )
 {
     /* if we are provided a subtitle.sub file,
      * see if we don't have a subtitle.idx and use it instead */
-    char *psz_path = strdup( psz_subtitle );
-    if( likely(psz_path != NULL) )
+    char *psz_idxpath = NULL;
+    char *psz_extension = b_check_idx ? strrchr( psz_subtitle, '.') : NULL;
+    if( psz_extension && strcmp( psz_extension, ".sub" ) == 0 )
     {
-        char *psz_extension = strrchr( psz_path, '.');
-        if( psz_extension && strcmp( psz_extension, ".sub" ) == 0 )
+        psz_idxpath = strdup( psz_subtitle );
+        if( psz_idxpath )
         {
             struct stat st;
 
+            psz_extension = psz_extension - psz_subtitle + psz_idxpath;
             strcpy( psz_extension, ".idx" );
 
-            if( !vlc_stat( psz_path, &st ) && S_ISREG( st.st_mode ) )
+            if( !vlc_stat( psz_idxpath, &st ) && S_ISREG( st.st_mode ) )
             {
                 msg_Dbg( p_input, "using %s as subtitle file instead of %s",
-                         psz_path, psz_subtitle );
-                strcpy( psz_subtitle, psz_path ); /* <- FIXME! constify */
+                         psz_idxpath, psz_subtitle );
+                psz_subtitle = psz_idxpath;
             }
         }
-        free( psz_path );
     }
 
     char *url = vlc_path2uri( psz_subtitle, NULL );
+    free( psz_idxpath );
     if( url == NULL )
         return;
 

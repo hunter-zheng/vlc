@@ -189,11 +189,7 @@ static int cmp_entity (const void *key, const void *elem)
     return strncmp (name, ent->psz_entity, strlen (ent->psz_entity));
 }
 
-/**
- * Converts "&lt;", "&gt;" and "&amp;" to "<", ">" and "&"
- * \param string to convert
- */
-void resolve_xml_special_chars( char *psz_value )
+void vlc_xml_decode( char *psz_value )
 {
     char *p_pos = psz_value;
 
@@ -215,7 +211,7 @@ void resolve_xml_special_chars( char *psz_value )
                 {
                     psz_value = psz_end + 1;
                     if( cp == 0 )
-                        (void)0; /* skip nuls */
+                        (void)0; /* skip nulls */
                     else
                     if( cp <= 0x7F )
                     {
@@ -285,13 +281,7 @@ void resolve_xml_special_chars( char *psz_value )
     *p_pos = '\0';
 }
 
-/**
- * XML-encode an UTF-8 string
- * \param str nul-terminated UTF-8 byte sequence to XML-encode
- * \return XML encoded string or NULL on error
- * (errno is set to ENOMEM or EILSEQ as appropriate)
- */
-char *convert_xml_special_chars (const char *str)
+char *vlc_xml_encode (const char *str)
 {
     assert (str != NULL);
 
@@ -312,10 +302,6 @@ char *convert_xml_special_chars (const char *str)
             return NULL;
         }
 
-        if ((cp & ~0x0080) < 32 /* C0/C1 control codes */
-         && memchr ("\x09\x0A\x0D\x85", cp, 4) == NULL)
-            ptr += sprintf (ptr, "&#%"PRIu32";", cp);
-        else
         switch (cp)
         {
             case '\"': strcpy (ptr, "&quot;"); ptr += 6; break;
@@ -323,7 +309,22 @@ char *convert_xml_special_chars (const char *str)
             case '\'': strcpy (ptr, "&#39;");  ptr += 5; break;
             case '<':  strcpy (ptr, "&lt;");   ptr += 4; break;
             case '>':  strcpy (ptr, "&gt;");   ptr += 4; break;
-            default:   memcpy (ptr, str, n);   ptr += n; break;
+            default:
+                if (cp < 32) /* C0 code not allowed (except 9, 10 and 13) */
+                    break;
+                if (cp >= 128 && cp < 160) /* C1 code encoded (except 133) */
+                {
+                    ptr += sprintf (ptr, "&#%"PRIu32";", cp);
+                    break;
+                }
+                /* fall through */
+            case 9:
+            case 10:
+            case 13:
+            case 133:
+                memcpy (ptr, str, n);
+                ptr += n;
+                break;
         }
         str += n;
     }
@@ -548,6 +549,8 @@ char *str_format_meta(input_thread_t *input, const char *s)
     bool b_is_format = false;
     bool b_empty_if_na = false;
 
+    assert(s != NULL);
+
     while ((c = *s) != '\0')
     {
         s++;
@@ -603,6 +606,9 @@ char *str_format_meta(input_thread_t *input, const char *s)
                 break;
             case 'n':
                 write_meta(stream, item, vlc_meta_TrackNumber);
+                break;
+            case 'o':
+                write_meta(stream, item, vlc_meta_TrackTotal);
                 break;
             case 'p':
                 if (item == NULL)
@@ -685,7 +691,7 @@ char *str_format_meta(input_thread_t *input, const char *s)
                 {
                     assert(input != NULL);
                     write_duration(stream, input_item_GetDuration(item)
-                                   - var_GetTime(input, "time"));
+                                   - var_GetInteger(input, "time"));
                 }
                 else if (!b_empty_if_na)
                     fputs("--:--:--", stream);
@@ -742,7 +748,7 @@ char *str_format_meta(input_thread_t *input, const char *s)
                 break;
             case 'T':
                 if (input != NULL)
-                    write_duration(stream, var_GetTime(input, "time"));
+                    write_duration(stream, var_GetInteger(input, "time"));
                 else if (!b_empty_if_na)
                     fputs("--:--:--", stream);
                 break;
@@ -880,89 +886,4 @@ void filename_sanitize( char *str )
             break;
         *str = '_';
     }
-}
-
-/**
- * Remove forbidden characters from full paths (leaves slashes)
- */
-void path_sanitize( char *str )
-{
-#if defined( _WIN32 ) || defined( __OS2__ )
-    /* check drive prefix if path is absolute */
-    if( (((unsigned char)(str[0] - 'A') < 26)
-      || ((unsigned char)(str[0] - 'a') < 26)) && (':' == str[1]) )
-        str += 2;
-#endif
-    while( *str )
-    {
-#if defined( __APPLE__ )
-        if( *str == ':' )
-            *str = '_';
-#elif defined( _WIN32 ) || defined( __OS2__ )
-        if( strchr( "*\"?:|<>", *str ) )
-            *str = '_';
-        if( *str == '/' )
-            *str = DIR_SEP_CHAR;
-#endif
-        str++;
-    }
-}
-
-/*
-  Decodes a duration as defined by ISO 8601
-  http://en.wikipedia.org/wiki/ISO_8601#Durations
-  @param str A null-terminated string to convert
-  @return: The duration in seconds. -1 if an error occurred.
-
-  Exemple input string: "PT0H9M56.46S"
- */
-time_t str_duration( const char *psz_duration )
-{
-    bool        timeDesignatorReached = false;
-    time_t      res = 0;
-    char*       end_ptr;
-
-    if ( psz_duration == NULL )
-        return -1;
-    if ( ( *(psz_duration++) ) != 'P' )
-        return -1;
-    do
-    {
-        double number = us_strtod( psz_duration, &end_ptr );
-        double      mul = 0;
-        if ( psz_duration != end_ptr )
-            psz_duration = end_ptr;
-        switch( *psz_duration )
-        {
-            case 'M':
-            {
-                //M can mean month or minutes, if the 'T' flag has been reached.
-                //We don't handle months though.
-                if ( timeDesignatorReached == true )
-                    mul = 60.0;
-                break ;
-            }
-            case 'Y':
-            case 'W':
-                break ; //Don't handle this duration.
-            case 'D':
-                mul = 86400.0;
-                break ;
-            case 'T':
-                timeDesignatorReached = true;
-                break ;
-            case 'H':
-                mul = 3600.0;
-                break ;
-            case 'S':
-                mul = 1.0;
-                break ;
-            default:
-                break ;
-        }
-        res += (time_t)(mul * number);
-        if ( *psz_duration )
-            psz_duration++;
-    } while ( *psz_duration );
-    return res;
 }

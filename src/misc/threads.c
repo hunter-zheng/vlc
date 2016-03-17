@@ -36,7 +36,6 @@ void vlc_global_mutex (unsigned n, bool acquire)
         VLC_STATIC_MUTEX,
         VLC_STATIC_MUTEX,
         VLC_STATIC_MUTEX,
-        VLC_STATIC_MUTEX,
     };
     static_assert (VLC_MAX_MUTEX == (sizeof (locks) / sizeof (locks[0])),
                    "Wrong number of global mutexes");
@@ -170,6 +169,7 @@ void vlc_sem_wait (vlc_sem_t *sem)
     while (!sem->value)
         vlc_cond_wait (&sem->wait, &sem->lock);
     sem->value--;
-    vlc_cleanup_run ();
+    vlc_cleanup_pop ();
+    vlc_mutex_unlock (&sem->lock);
 }
 #endif /* LIBVLC_NEED_SEMAPHORE */

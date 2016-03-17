@@ -57,7 +57,7 @@ static const char sub_exts[][6] = {
     "usf", "jss",  "cdg",
     "psb", "mpsub","mpl2",
     "pjs", "dks", "stl",
-    "vtt",""
+    "vtt", "sbv", ""
 };
 
 static void strcpy_trim( char *d, const char *s )
@@ -259,7 +259,7 @@ char **subtitles_Detect( input_thread_t *p_this, char *psz_path,
     if( !psz_name_org )
         return NULL;
 
-    char *psz_fname = make_path( psz_name_org );
+    char *psz_fname = vlc_uri2path( psz_name_org );
     if( !psz_fname )
         return NULL;
 

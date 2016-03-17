@@ -285,13 +285,17 @@ static int vlclua_input_item_is_preparsed( lua_State *L )
 
 static int vlclua_input_item_uri( lua_State *L )
 {
-    lua_pushstring( L, input_item_GetURI( vlclua_input_item_get_internal( L ) ) );
+    char *uri = input_item_GetURI( vlclua_input_item_get_internal( L ) );
+    lua_pushstring( L, uri );
+    free( uri );
     return 1;
 }
 
 static int vlclua_input_item_name( lua_State *L )
 {
-    lua_pushstring( L, input_item_GetName( vlclua_input_item_get_internal( L ) ) );
+    char *name = input_item_GetName( vlclua_input_item_get_internal( L ) );
+    lua_pushstring( L, name );
+    free( name );
     return 1;
 }
 
@@ -341,6 +345,7 @@ static int vlclua_input_item_set_meta( lua_State *L )
         META_TYPE( Actors, "actors" )
         META_TYPE( AlbumArtist, "album_artist" )
         META_TYPE( DiscNumber, "disc_number" )
+        META_TYPE( DiscTotal, "disc_total" )
     };
 #undef META_TYPE
 

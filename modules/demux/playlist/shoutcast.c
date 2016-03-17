@@ -59,6 +59,7 @@ int Import_Shoutcast( vlc_object_t *p_this )
 {
     demux_t *p_demux = (demux_t *)p_this;
 
+    CHECK_FILE();
     if( !demux_IsForced( p_demux, "shout-winamp" ) )
         return VLC_EGENERIC;
 
@@ -170,7 +171,7 @@ static int DemuxGenre( demux_t *p_demux, xml_reader_t *p_xml_reader,
                                   psz_name ) != -1 )
                     {
                         input_item_t *p_input;
-                        resolve_xml_special_chars( psz_mrl );
+                        vlc_xml_decode( psz_mrl );
                         p_input = input_item_New( psz_mrl, psz_name );
                         input_item_CopyOptions( p_input_node->p_item, p_input );
                         free( psz_mrl );
@@ -318,7 +319,7 @@ static int DemuxStation( demux_t *p_demux, xml_reader_t *p_xml_reader,
 
                     if( likely(psz_mrl != NULL) )
                     {
-                        resolve_xml_special_chars( psz_mrl );
+                        vlc_xml_decode( psz_mrl );
                         p_input = input_item_New( psz_mrl, psz_name );
                         free( psz_mrl );
                     }

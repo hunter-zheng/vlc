@@ -245,7 +245,7 @@ static void *Run( void * p_obj )
     }
     if( Dialogs::instance( p_intf ) == NULL )
     {
-        msg_Err( p_intf, "cannot instantiate qt4 dialogs provider" );
+        msg_Err( p_intf, "cannot instantiate qt dialogs provider" );
         b_error = true;
         goto end;
     }
@@ -408,6 +408,7 @@ static int WindowOpen( vout_window_t *pWnd, const vout_window_cfg_t *cfg )
         return VLC_EGENERIC;
     }
 
+    vout_window_SetFullScreen( pWnd, cfg->is_fullscreen );
     return VLC_SUCCESS;
 }
 

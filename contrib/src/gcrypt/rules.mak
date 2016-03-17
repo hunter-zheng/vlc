@@ -1,5 +1,5 @@
 # GCRYPT
-GCRYPT_VERSION := 1.6.2
+GCRYPT_VERSION := 1.6.4
 GCRYPT_URL := ftp://ftp.gnupg.org/gcrypt/libgcrypt/libgcrypt-$(GCRYPT_VERSION).tar.bz2
 
 PKGS += gcrypt
@@ -13,6 +13,8 @@ libgcrypt: libgcrypt-$(GCRYPT_VERSION).tar.bz2 .sum-gcrypt
 	$(UNPACK)
 	$(APPLY) $(SRC)/gcrypt/fix-amd64-assembly-on-solaris.patch
 	$(APPLY) $(SRC)/gcrypt/0001-Fix-assembly-division-check.patch
+	$(APPLY) $(SRC)/gcrypt/disable-doc-compilation.patch
+	$(APPLY) $(SRC)/gcrypt/disable-tests-compilation.patch
 	$(MOVE)
 
 DEPS_gcrypt = gpg-error
@@ -41,6 +43,11 @@ ifeq ($(ANDROID_ABI), x86)
 GCRYPT_CONF += ac_cv_sys_symbol_underscore=no
 endif
 ifeq ($(ANDROID_ABI), x86_64)
+GCRYPT_CONF += ac_cv_sys_symbol_underscore=no
+endif
+endif
+ifdef HAVE_TIZEN
+ifeq ($(TIZEN_ABI), x86)
 GCRYPT_CONF += ac_cv_sys_symbol_underscore=no
 endif
 endif

@@ -23,11 +23,6 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-/**
- * \file
- * This file defines libvlc_media external API
- */
-
 #ifndef VLC_LIBVLC_MEDIA_H
 #define VLC_LIBVLC_MEDIA_H 1
 
@@ -40,6 +35,8 @@ extern "C" {
  * @ref libvlc_media_t is an abstract representation of a playable media.
  * It consists of a media location and various optional meta data.
  * @{
+ * \file
+ * LibVLC media item/descriptor external API
  */
 
 typedef struct libvlc_media_t libvlc_media_t;
@@ -75,7 +72,8 @@ typedef enum libvlc_meta_t {
     libvlc_meta_ShowName,
     libvlc_meta_Actors,
     libvlc_meta_AlbumArtist,
-    libvlc_meta_DiscNumber
+    libvlc_meta_DiscNumber,
+    libvlc_meta_DiscTotal
     /* Add new meta types HERE */
 } libvlc_meta_t;
 
@@ -267,6 +265,12 @@ typedef enum libvlc_media_parse_flag_t
      * Fetch meta and covert art using network resources
      */
     libvlc_media_fetch_network  = 0x04,
+    /**
+     * Interact with the user (via libvlc_dialog_cbs) when preparsing this item
+     * (and not its sub items). Set this flag in order to receive a callback
+     * when the input is asking for credentials.
+     */
+    libvlc_media_do_interact    = 0x08,
 } libvlc_media_parse_flag_t;
 
 /**
@@ -275,11 +279,11 @@ typedef enum libvlc_media_parse_flag_t
  * The same media item can be opened multiple times. Each time, this callback
  * is invoked. It should allocate and initialize any instance-specific
  * resources, then store them in *datap. The instance resources can be freed
- * in the @ref libvlc_close_cb callback.
+ * in the @ref libvlc_media_close_cb callback.
  *
  * \param opaque private pointer as passed to libvlc_media_new_callbacks()
  * \param datap storage space for a private data pointer [OUT]
- * \param sizep byte length of the bitstream or 0 if unknown [OUT]
+ * \param sizep byte length of the bitstream or UINT64_MAX if unknown [OUT]
  *
  * \note For convenience, *datap is initially NULL and *sizep is initially 0.
  *

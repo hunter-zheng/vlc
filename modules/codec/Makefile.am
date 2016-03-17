@@ -182,6 +182,10 @@ libaribsub_plugin_la_LIBADD = $(ARIBB24_LIBS)
 EXTRA_LTLIBRARIES += libaribsub_plugin.la
 codec_LTLIBRARIES += $(LTLIBaribsub)
 
+libscte18_plugin_la_SOURCES = codec/scte18.c codec/scte18.h \
+                              codec/atsc_a65.c codec/atsc_a65.h
+codec_LTLIBRARIES += libscte18_plugin.la
+
 libscte27_plugin_la_SOURCES = codec/scte27.c
 codec_LTLIBRARIES += libscte27_plugin.la
 
@@ -197,6 +201,9 @@ codec_LTLIBRARIES += libsubsdec_plugin.la
 
 libsubsusf_plugin_la_SOURCES = codec/subsusf.c
 codec_LTLIBRARIES += libsubsusf_plugin.la
+
+libsubsttml_plugin_la_SOURCES = codec/substtml.c
+codec_LTLIBRARIES += libsubsttml_plugin.la
 
 libsvcdsub_plugin_la_SOURCES = codec/svcdsub.c
 codec_LTLIBRARIES += libsvcdsub_plugin.la
@@ -282,6 +289,20 @@ libvorbis_plugin_la_LIBADD = $(VORBIS_LIBS)
 EXTRA_LTLIBRARIES += libvorbis_plugin.la
 codec_LTLIBRARIES += $(LTLIBvorbis)
 
+liboggspots_plugin_la_SOURCES = codec/oggspots.c
+liboggspots_plugin_la_CFLAGS = $(AM_CFLAGS) $(OGGSPOTS_CFLAGS)
+liboggspots_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(codecdir)'
+liboggspots_plugin_la_LIBADD = $(OGGSPOTS_LIBS)
+EXTRA_LTLIBRARIES += liboggspots_plugin.la
+codec_LTLIBRARIES += $(LTLIBoggspots)
+
+libvideotoolbox_plugin_la_SOURCES = video_chroma/copy.c video_chroma/copy.h codec/videotoolbox.m \
+                                    packetizer/h264_nal.c packetizer/h264_nal.h \
+                                    packetizer/hxxx_nal.c packetizer/hxxx_nal.h
+libvideotoolbox_plugin_la_CFLAGS = $(AM_CFLAGS) -fobjc-arc
+libvideotoolbox_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(codecdir)' -Wl,-framework,Foundation -Wl,-framework,VideoToolbox -Wl,-framework,CoreMedia -Wl,-framework,CoreVideo
+EXTRA_LTLIBRARIES += libvideotoolbox_plugin.la
+codec_LTLIBRARIES += $(LTLIBvideotoolbox)
 
 ### FFmpeg/libav ###
 
@@ -310,6 +331,9 @@ if ENABLE_SOUT
 libavcodec_plugin_la_SOURCES += demux/avformat/mux.c
 endif
 libavcodec_plugin_la_CFLAGS += -DMERGE_FFMPEG
+endif
+if HAVE_DARWIN
+libavcodec_plugin_la_LDFLAGS += -Wl,-framework,Foundation -Wl,-framework,Security,-framework,CoreFoundation
 endif
 if HAVE_AVCODEC
 codec_LTLIBRARIES += libavcodec_plugin.la
@@ -341,11 +365,20 @@ endif
 endif
 
 libdxva2_plugin_la_SOURCES = \
-	video_chroma/copy.c video_chroma/copy.h \
-	codec/avcodec/dxva2.c
+	codec/avcodec/dxva2.c codec/avcodec/directx_va.c codec/avcodec/directx_va.h \
+	packetizer/h264_nal.c packetizer/h264_nal.h
 libdxva2_plugin_la_LIBADD = -lole32 -lshlwapi -luuid
 if HAVE_AVCODEC_DXVA2
 codec_LTLIBRARIES += libdxva2_plugin.la
+endif
+
+libd3d11va_plugin_la_SOURCES = \
+	codec/avcodec/d3d11va.c codec/avcodec/directx_va.c codec/avcodec/directx_va.h \
+	video_chroma/dxgi_fmt.c video_chroma/dxgi_fmt.h \
+	packetizer/h264_nal.c packetizer/h264_nal.h
+libd3d11va_plugin_la_LIBADD = -lole32 -luuid
+if HAVE_AVCODEC_D3D11VA
+codec_LTLIBRARIES += libd3d11va_plugin.la
 endif
 
 libvda_plugin_la_SOURCES = \
@@ -375,11 +408,14 @@ noinst_HEADERS += \
 
 libomxil_plugin_la_SOURCES = \
 	codec/omxil/utils.c codec/omxil/omxil_utils.h \
-	codec/h264_nal.c codec/h264_nal.h \
-	codec/hevc_nal.c codec/hevc_nal.h \
+	packetizer/h264_nal.c packetizer/h264_nal.h \
+	packetizer/hevc_nal.c packetizer/hevc_nal.h \
 	codec/omxil/qcom.c codec/omxil/qcom.h \
 	codec/omxil/omxil.c codec/omxil/omxil.h codec/omxil/omxil_core.c codec/omxil/omxil_core.h \
 	video_chroma/copy.c
+if HAVE_ANDROID
+libomxil_plugin_la_SOURCES += video_output/android/utils.c video_output/android/utils.h
+endif
 libomxil_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(srcdir)/codec/omxil $(CFLAGS_omxil)
 libomxil_plugin_la_LIBADD = $(LIBDL)
 libomxil_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(codecdir)'
@@ -394,9 +430,12 @@ libiomx_plugin_la_CPPFLAGS = $(libomxil_plugin_la_CPPFLAGS) -DUSE_IOMX
 libiomx_plugin_la_LIBADD = $(libomxil_plugin_la_LIBADD)
 
 libmediacodec_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(srcdir)/codec/omxil
-libmediacodec_plugin_la_SOURCES = codec/omxil/android_mediacodec.c codec/omxil/utils.c \
-	video_chroma/copy.c codec/omxil/android_opaque.c codec/omxil/android_opaque.h \
-	codec/h264_nal.c codec/h264_nal.h codec/hevc_nal.c codec/hevc_nal.h
+libmediacodec_plugin_la_SOURCES = codec/omxil/mediacodec.c codec/omxil/mediacodec.h \
+	codec/omxil/mediacodec_jni.c codec/omxil/mediacodec_ndk.c codec/omxil/utils.c \
+	video_chroma/copy.c \
+	video_output/android/utils.c video_output/android/utils.h \
+	packetizer/hxxx_nal.h packetizer/h264_nal.c packetizer/h264_nal.h \
+	packetizer/hevc_nal.c packetizer/hevc_nal.h
 
 codec_LTLIBRARIES += $(LTLIBomxil) $(LTLIBomxil_vout)
 EXTRA_LTLIBRARIES += libomxil_plugin.la libomxil_vout_plugin.la
@@ -474,7 +513,7 @@ codec_LTLIBRARIES += $(LTLIBtwolame)
 
 ### Hardware encoders ###
 
-libcrystalhd_plugin_la_SOURCES = codec/crystalhd.c codec/h264_nal.c codec/h264_nal.h
+libcrystalhd_plugin_la_SOURCES = codec/crystalhd.c packetizer/h264_nal.c packetizer/h264_nal.h
 libcrystalhd_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(codecdir)'
 libcrystalhd_plugin_la_LIBADD = $(LIBS_crystalhd)
 EXTRA_LTLIBRARIES += libcrystalhd_plugin.la
@@ -498,7 +537,7 @@ libdmo_plugin_la_LIBADD += -lole32 -luuid
 codec_LTLIBRARIES += libdmo_plugin.la
 endif
 
-libmft_plugin_la_SOURCES = codec/mft.c codec/h264_nal.c codec/h264_nal.h
+libmft_plugin_la_SOURCES = codec/mft.c packetizer/h264_nal.c packetizer/h264_nal.h
 if HAVE_WIN32
 libmft_plugin_la_LIBADD = -lole32 -luuid -lmfuuid -lmfplat
 codec_LTLIBRARIES += libmft_plugin.la
@@ -510,7 +549,13 @@ libquicktime_plugin_la_LIBADD = $(LIBM)
 EXTRA_LTLIBRARIES += libquicktime_plugin.la
 codec_LTLIBRARIES += $(LTLIBquicktime)
 
-libgstdecode_plugin_la_SOURCES = codec/gstdecode.c
+libgstdecode_plugin_la_SOURCES = codec/gstreamer/gstdecode.c \
+								 codec/gstreamer/gstvlcpictureplaneallocator.c \
+								 codec/gstreamer/gstvlcpictureplaneallocator.h \
+								 codec/gstreamer/gstvlcvideopool.c \
+								 codec/gstreamer/gstvlcvideopool.h \
+								 codec/gstreamer/gstvlcvideosink.c \
+								 codec/gstreamer/gstvlcvideosink.h
 libgstdecode_plugin_la_CFLAGS = $(AM_CFLAGS) $(GST_VIDEO_CFLAGS) $(GST_APP_CFLAGS)
 libgstdecode_plugin_la_LIBADD = $(GST_VIDEO_LIBS) $(GST_APP_LIBS)
 if HAVE_GST_DECODE

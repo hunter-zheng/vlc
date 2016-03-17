@@ -554,8 +554,7 @@ static void *Run( void *data )
                     uint8_t p_buffer[MAX_SAP_BUFFER+1];
                     ssize_t i_read;
 
-                    i_read = net_Read (p_sd, ufd[i].fd, NULL, p_buffer,
-                                       MAX_SAP_BUFFER, false);
+                    i_read = recv (ufd[i].fd, p_buffer, MAX_SAP_BUFFER, 0);
                     if (i_read < 0)
                         msg_Warn (p_sd, "receive error: %s",
                                   vlc_strerror_c(errno));
@@ -614,10 +613,9 @@ static void *Run( void *data )
 static int Demux( demux_t *p_demux )
 {
     sdp_t *p_sdp = p_demux->p_sys->p_sdp;
-    input_thread_t *p_input;
+    input_thread_t *p_input = p_demux->p_input;
     input_item_t *p_parent_input;
 
-    p_input = demux_GetParentInput( p_demux );
     assert( p_input );
     if( !p_input )
     {
@@ -647,7 +645,6 @@ static int Demux( demux_t *p_demux )
     p_parent_input->b_net = true;
 
     vlc_mutex_unlock( &p_parent_input->lock );
-    vlc_object_release( p_input );
     return VLC_SUCCESS;
 }
 
@@ -729,7 +726,7 @@ static int ParseSAP( services_discovery_t *p_sd, const uint8_t *buf,
             return VLC_EGENERIC;
         }
 
-        decomp = realloc (decomp, newsize + 1);
+        decomp = xrealloc (decomp, newsize + 1);
         decomp[newsize] = '\0';
         psz_sdp = (const char *)decomp;
         len = newsize;
@@ -1499,7 +1496,7 @@ static int Decompress( const unsigned char *psz_src, unsigned char **_dst, int i
     do
     {
         n++;
-        psz_dst = (unsigned char *)realloc( psz_dst, n * 1000 );
+        psz_dst = xrealloc( psz_dst, n * 1000 );
         d_stream.next_out = (Bytef *)&psz_dst[(n - 1) * 1000];
         d_stream.avail_out = 1000;
 
@@ -1517,7 +1514,7 @@ static int Decompress( const unsigned char *psz_src, unsigned char **_dst, int i
     i_dstsize = d_stream.total_out;
     inflateEnd( &d_stream );
 
-    *_dst = (unsigned char *)realloc( psz_dst, i_dstsize );
+    *_dst = xrealloc( psz_dst, i_dstsize );
 
     return i_dstsize;
 #else

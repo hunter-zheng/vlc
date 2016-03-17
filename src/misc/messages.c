@@ -57,11 +57,14 @@ static void vlc_vaLogCallback(libvlc_int_t *vlc, int type,
                               va_list ap)
 {
     vlc_logger_t *logger = libvlc_priv(vlc)->logger;
+    int canc;
 
     assert(logger != NULL);
+    canc = vlc_savecancel();
     vlc_rwlock_rdlock(&logger->lock);
     logger->log(logger->sys, type, item, format, ap);
     vlc_rwlock_unlock(&logger->lock);
+    vlc_restorecancel(canc);
 }
 
 static void vlc_LogCallback(libvlc_int_t *vlc, int type, const vlc_log_t *item,
@@ -93,7 +96,7 @@ void vlc_vaLog (vlc_object_t *obj, int type, const char *module,
     /* Get basename from the module filename */
     char *p = strrchr(module, '/');
     if (p != NULL)
-        module = p;
+        module = p + 1;
     p = strchr(module, '.');
 
     size_t modlen = (p != NULL) ? (p - module) : 0;
@@ -175,7 +178,7 @@ static void Win32DebugOutputMsg (void* d, int type, const vlc_log_t *p_item,
     int msg_len = vsnprintf(NULL, 0, format, dol2);
     va_end (dol2);
 
-    if(msg_len <= 0)
+    if (msg_len <= 0)
         return;
 
     char *msg = malloc(msg_len + 1 + 1);
@@ -184,12 +187,12 @@ static void Win32DebugOutputMsg (void* d, int type, const vlc_log_t *p_item,
 
     msg_len = vsnprintf(msg, msg_len+1, format, dol);
     if (msg_len > 0){
-        if(msg[msg_len-1] != '\n'){
+        if (msg[msg_len-1] != '\n') {
             msg[msg_len] = '\n';
             msg[msg_len + 1] = '\0';
         }
         char* psz_msg = NULL;
-        if(asprintf(&psz_msg, "%s %s%s: %s", p_item->psz_module,
+        if (asprintf(&psz_msg, "%s %s%s: %s", p_item->psz_module,
                     p_item->psz_object_type, msg_type[type], msg) > 0) {
             wchar_t* wmsg = ToWide(psz_msg);
             OutputDebugStringW(wmsg);
@@ -236,10 +239,8 @@ static void vlc_vaLogEarly(void *d, int type, const vlc_log_t *item,
     log->meta.line = item->line;
     log->meta.func = item->func;
 
-    int canc = vlc_savecancel(); /* XXX: needed for vasprintf() ? */
     if (vasprintf(&log->msg, format, ap) == -1)
         log->msg = NULL;
-    vlc_restorecancel(canc);
 
     vlc_mutex_lock(&sys->lock);
     assert(sys->tailp != NULL);

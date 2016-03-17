@@ -736,10 +736,10 @@ static int OpenVideo( decoder_t *p_dec )
         msg_Err( p_dec, "cannot find requested component" );
         goto exit_error;
     }
-    msg_Dbg( p_dec, "component id=0x%p", prev );
+    msg_Dbg( p_dec, "component id=0x%p", (void *)prev );
 
     p_sys->ci =  p_sys->OpenComponent( prev );
-    msg_Dbg( p_dec, "component instance p=0x%p", p_sys->ci );
+    msg_Dbg( p_dec, "component instance p=0x%p", (void *)p_sys->ci );
 
     memset( &icap, 0, sizeof( ImageSubCodecDecompressCapabilities ) );
     cres =  p_sys->ImageCodecInitialize( p_sys->ci, &icap );
@@ -803,6 +803,7 @@ static int OpenVideo( decoder_t *p_dec )
 
     p_sys->framedescHandle = (ImageDescriptionHandle) NewHandleClear( id->idSize );
     memcpy( *p_sys->framedescHandle, id, id->idSize );
+    free( id );
 
     if( p_dec->fmt_in.video.i_width != 0 && p_dec->fmt_in.video.i_height != 0) 
         p_sys->plane = malloc( p_dec->fmt_in.video.i_width * p_dec->fmt_in.video.i_height * 3 );

@@ -179,6 +179,7 @@ typedef struct
  * Local prototypes
  *****************************************************************************/
 static block_t *DecodeFrame  ( decoder_t *, block_t ** );
+static void Flush( decoder_t * );
 
 /* */
 static int VobHeader( unsigned *pi_rate,
@@ -298,6 +299,7 @@ static int OpenCommon( vlc_object_t *p_this, bool b_packetizer )
     /* Set callback */
     p_dec->pf_decode_audio = DecodeFrame;
     p_dec->pf_packetize    = DecodeFrame;
+    p_dec->pf_flush        = Flush;
 
     return VLC_SUCCESS;
 }
@@ -308,6 +310,16 @@ static int OpenDecoder( vlc_object_t *p_this )
 static int OpenPacketizer( vlc_object_t *p_this )
 {
     return OpenCommon( p_this, true );
+}
+
+/*****************************************************************************
+ * Flush:
+ *****************************************************************************/
+static void Flush( decoder_t *p_dec )
+{
+    decoder_sys_t *p_sys = p_dec->p_sys;
+
+    date_Set( &p_sys->end_date, 0 );
 }
 
 /*****************************************************************************
@@ -326,6 +338,15 @@ static block_t *DecodeFrame( decoder_t *p_dec, block_t **pp_block )
 
     p_block = *pp_block;
     *pp_block = NULL; /* So the packet doesn't get re-sent */
+
+    if( p_block->i_flags & BLOCK_FLAG_DISCONTINUITY )
+        Flush( p_dec );
+
+    if( p_block->i_flags & BLOCK_FLAG_CORRUPTED )
+    {
+        block_Release( p_block );
+        return NULL;
+    }
 
     /* Date management */
     if( p_block->i_pts > VLC_TS_INVALID &&
@@ -813,7 +834,7 @@ static int AobHeader( unsigned *pi_rate,
 
     /* */
     /* max is 0x2, 0xf == unused */
-    g[0].i_bits = ( i_index_size_g1 != 0x0f ) ? 16 + 4 * i_index_size_g1 : 0;
+    g[0].i_bits = 16 + 4 * i_index_size_g1;
     g[1].i_bits = ( i_index_size_g2 != 0x0f ) ? 16 + 4 * i_index_size_g2 : 0;
 
     /* No info about interlacing of different sampling rate */

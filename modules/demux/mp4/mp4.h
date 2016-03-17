@@ -18,8 +18,8 @@
  * along with this program; if not, write to the Free Software Foundation,
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
-#ifndef _VLC_MP4_H
-#define _VLC_MP4_H 1
+#ifndef VLC_MP4_MP4_H_
+#define VLC_MP4_MP4_H_
 
 /*****************************************************************************
  * Preamble
@@ -31,6 +31,7 @@
 
 #include <vlc_common.h>
 #include "libmp4.h"
+#include "fragments.h"
 #include "../asf/asfpacket.h"
 
 /* Contain all information about a chunk */
@@ -90,12 +91,11 @@ typedef struct
 
     /* more internal data */
     uint32_t        i_timescale;    /* time scale for this track only */
-    uint16_t        current_qid;    /* Smooth Streaming quality level ID */
 
     /* elst */
     int             i_elst;         /* current elst */
     int64_t         i_elst_time;    /* current elst start time (in movie time scale)*/
-    MP4_Box_t       *p_elst;        /* elst (could be NULL) */
+    const MP4_Box_t *p_elst;        /* elst (could be NULL) */
 
     /* give the next sample to read, i_chunk is to find quickly where
       the sample is located */
@@ -119,52 +119,35 @@ typedef struct
     uint64_t     i_first_dts;    /* i_first_dts value
                                                    of the next chunk */
 
-    MP4_Box_t *p_track;
-    MP4_Box_t *p_stbl;  /* will contain all timing information */
-    MP4_Box_t *p_stsd;  /* will contain all data to initialize decoder */
-    MP4_Box_t *p_sample;/* point on actual sdsd */
+    const MP4_Box_t *p_track;
+    const MP4_Box_t *p_stbl;  /* will contain all timing information */
+    const MP4_Box_t *p_stsd;  /* will contain all data to initialize decoder */
+    const MP4_Box_t *p_sample;/* point on actual sdsd */
 
-    bool b_drms;
     bool b_has_non_empty_cchunk;
     bool b_codec_need_restart;
-    void      *p_drms;
-    MP4_Box_t *p_skcr;
 
     mtime_t i_time; // track scaled
 
     struct
     {
         /* for moof parsing */
-        MP4_Box_t *p_traf;
-        MP4_Box_t *p_tfhd;
-        MP4_Box_t *p_trun;
+        const MP4_Box_t *p_traf;
+        const MP4_Box_t *p_tfhd;
+        const MP4_Box_t *p_trun;
         uint64_t   i_traf_base_offset;
     } context;
 
     /* ASF packets handling */
-    MP4_Box_t       *p_asf;
+    const MP4_Box_t *p_asf;
     mtime_t          i_dts_backup;
     mtime_t          i_pts_backup;
     asf_track_info_t asfinfo;
 } mp4_track_t;
 
-typedef struct mp4_fragment_t mp4_fragment_t;
-struct mp4_fragment_t
-{
-    uint64_t i_chunk_range_min_offset;
-    uint64_t i_chunk_range_max_offset;
-    struct
-    {
-        unsigned int i_track_ID;
-        uint64_t i_duration; // movie scaled
-    } *p_durations;
-    unsigned int i_durations;
-    MP4_Box_t *p_moox;
-    mp4_fragment_t *p_next;
-};
-
 int SetupVideoES( demux_t *p_demux, mp4_track_t *p_track, MP4_Box_t *p_sample );
 int SetupAudioES( demux_t *p_demux, mp4_track_t *p_track, MP4_Box_t *p_sample );
 int SetupSpuES( demux_t *p_demux, mp4_track_t *p_track, MP4_Box_t *p_sample );
+int SetupCCES( demux_t *p_demux, mp4_track_t *p_track, MP4_Box_t *p_sample );
 void SetupMeta( vlc_meta_t *p_meta, MP4_Box_t *p_udta );
 #endif

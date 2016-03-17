@@ -25,36 +25,38 @@
 #ifndef DASHMANAGER_H_
 #define DASHMANAGER_H_
 
-#include "http/HTTPConnectionManager.h"
-#include "adaptationlogic/AbstractAdaptationLogic.h"
+#include "../adaptive/PlaylistManager.h"
+#include "../adaptive/logic/AbstractAdaptationLogic.h"
 #include "mpd/MPD.h"
+
+namespace adaptive
+{
+    namespace xml
+    {
+        class Node;
+    }
+}
 
 namespace dash
 {
-    class DASHManager
+    using namespace adaptive;
+
+    class DASHManager : public PlaylistManager
     {
         public:
-            DASHManager( mpd::MPD *mpd,
-                         logic::AbstractAdaptationLogic::LogicType type, stream_t *stream);
+            DASHManager( demux_t *, mpd::MPD *mpd,
+                         AbstractStreamFactory *,
+                         logic::AbstractAdaptationLogic::LogicType type);
             virtual ~DASHManager    ();
 
-            bool    start         (demux_t *);
-            size_t  read();
-            mtime_t getDuration() const;
-            mtime_t getPCR() const;
-            int     getGroup() const;
-            int     esCount() const;
-            bool    setPosition(mtime_t);
-            bool    seekAble() const;
-            bool    updateMPD();
+            virtual bool needsUpdate() const; /* reimpl */
+            virtual bool updatePlaylist(); /* reimpl */
+            virtual void scheduleNextUpdate();/* reimpl */
+            static bool isDASH(xml::Node *);
+            static bool mimeMatched(const std::string &);
 
-        private:
-            http::HTTPConnectionManager         *conManager;
-            logic::AbstractAdaptationLogic::LogicType  logicType;
-            mpd::MPD                            *mpd;
-            stream_t                            *stream;
-            Streams::Stream                     *streams[Streams::count];
-            mtime_t                              nextMPDupdate;
+        protected:
+            virtual int doControl(int, va_list); /* reimpl */
     };
 
 }

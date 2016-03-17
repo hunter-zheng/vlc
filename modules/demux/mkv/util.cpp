@@ -57,16 +57,19 @@ int32_t zlib_decompress_extra( demux_t * p_demux, mkv_track_t * tk )
     do
     {
         n++;
-        p_new_extra = (uint8_t *) realloc(p_new_extra, n*1024);
-        if( !p_new_extra )
+        void *alloc = realloc(p_new_extra, n*1024);
+        if( alloc == NULL )
         {
             msg_Err( p_demux, "Couldn't allocate buffer to inflate data, ignore track %d",
                       tk->i_number );
+            free(p_new_extra);
             inflateEnd( &d_stream );
             free(tk->p_extra_data);
             delete tk;
             return 1;
         }
+
+        p_new_extra = static_cast<uint8_t *>( alloc );
         d_stream.next_out = &p_new_extra[(n - 1) * 1024];
         d_stream.avail_out = 1024;
         result = inflate(&d_stream, Z_NO_FLUSH);
@@ -85,7 +88,7 @@ int32_t zlib_decompress_extra( demux_t * p_demux, mkv_track_t * tk )
 
     free( tk->p_extra_data );
     tk->i_extra_data = d_stream.total_out;
-    p_new_extra = (uint8_t *) realloc(p_new_extra, tk->i_extra_data);
+    p_new_extra = static_cast<uint8_t *>( realloc(p_new_extra, tk->i_extra_data) );
     if( !p_new_extra )
     {
         msg_Err( p_demux, "Couldn't allocate buffer to inflate data, ignore track %d",
@@ -97,7 +100,7 @@ int32_t zlib_decompress_extra( demux_t * p_demux, mkv_track_t * tk )
     }
 
     tk->p_extra_data = p_new_extra;
-    
+
     inflateEnd( &d_stream );
     return 0;
 }
@@ -108,9 +111,9 @@ block_t *block_zlib_decompress( vlc_object_t *p_this, block_t *p_in_block ) {
     block_t *p_block;
     z_stream d_stream;
 
-    d_stream.zalloc = (alloc_func)0;
-    d_stream.zfree = (free_func)0;
-    d_stream.opaque = (voidpf)0;
+    d_stream.zalloc = NULL;
+    d_stream.zfree = NULL;
+    d_stream.opaque = NULL;
     result = inflateInit(&d_stream);
     if( result != Z_OK )
     {
@@ -127,7 +130,7 @@ block_t *block_zlib_decompress( vlc_object_t *p_this, block_t *p_in_block ) {
     {
         n++;
         p_block = block_Realloc( p_block, 0, n * 1000 );
-        dst = (unsigned char *)p_block->p_buffer;
+        dst = static_cast<unsigned char *>( p_block->p_buffer );
         d_stream.next_out = (Bytef *)&dst[(n - 1) * 1000];
         d_stream.avail_out = 1000;
         result = inflate(&d_stream, Z_NO_FLUSH);
@@ -186,7 +189,7 @@ void handle_real_audio(demux_t * p_demux, mkv_track_t * p_tk, block_t * p_blk, m
 
         if ( !( p_blk->i_flags & BLOCK_FLAG_TYPE_I) )
         {
-            msg_Dbg( p_demux, "discard non-key preroll block in track %d at%"PRId64,
+            msg_Dbg( p_demux, "discard non-key preroll block in track %d at%" PRId64,
                      p_tk->i_number, i_pts );
             return;
         }
@@ -217,7 +220,7 @@ void handle_real_audio(demux_t * p_demux, mkv_track_t * p_tk, block_t * p_blk, m
             p_block->i_pts = VLC_TS_INVALID;
             if( !p_sys->i_subpacket )
             {
-                p_tk->i_last_dts = 
+                p_tk->i_last_dts =
                 p_block->i_pts = i_pts;
             }
 
@@ -246,7 +249,7 @@ void handle_real_audio(demux_t * p_demux, mkv_track_t * p_tk, block_t * p_blk, m
 void send_Block( demux_t * p_demux, mkv_track_t * p_tk, block_t * p_block, unsigned int i_number_frames, mtime_t i_duration )
 {
     demux_sys_t        *p_sys = p_demux->p_sys;
-    matroska_segment_c *p_segment = p_sys->p_current_segment->CurrentSegment();
+    matroska_segment_c *p_segment = p_sys->p_current_vsegment->CurrentSegment();
 
     if( p_tk->fmt.i_cat == AUDIO_ES && p_tk->i_chans_to_reorder )
     {
@@ -267,42 +270,13 @@ void send_Block( demux_t * p_demux, mkv_track_t * p_tk, block_t * p_block, unsig
             (double) p_segment->i_timescale / ( 1000.0 * i_number_frames );
     }
 
-    // find the latest DTS for an active track
-    mtime_t i_ts_max = INT64_MIN;
-    for( size_t j = 0; j < p_segment->tracks.size(); j++ )
-    {
-        mkv_track_t *tk = p_segment->tracks[j];
-        if( tk->i_last_dts > VLC_TS_INVALID )
-            i_ts_max = __MAX( i_ts_max, tk->i_last_dts );
-    }
-
-    // find the earliest DTS less than 10 clock ticks away from the latest DTS
-    mtime_t i_ts_min = INT64_MAX;
-    for( size_t j = 0; j < p_segment->tracks.size(); j++ )
-    {
-        mkv_track_t *tk = p_segment->tracks[j];
-        if( tk->i_last_dts > VLC_TS_INVALID && tk->i_last_dts + 10 * CLOCK_FREQ >= i_ts_max )
-            i_ts_min = __MIN( i_ts_min, tk->i_last_dts );
-    }
-
-    // the PCR is the earliest active DTS if we found one
-    if( i_ts_min != INT64_MAX && ( i_ts_min > p_sys->i_pcr || p_sys->i_pcr == VLC_TS_INVALID ) )
-    {
-        p_sys->i_pcr = i_ts_min;
-        es_out_Control( p_demux->out, ES_OUT_SET_PCR, i_ts_min );
-    }
-
-#if 0
-msg_Dbg( p_demux, "block (track=%d) i_dts: %"PRId64" / i_pts: %"PRId64, p_tk->i_number, p_block->i_dts, p_block->i_pts);
-#endif
-
     es_out_Send( p_demux->out, p_tk->p_es, p_block);
 }
 
 int32_t Cook_PrivateTrackData::Init()
 {
     i_subpackets = (size_t) i_sub_packet_h * (size_t) i_frame_size / (size_t) i_subpacket_size;
-    p_subpackets = (block_t**) calloc(i_subpackets, sizeof(block_t*));
+    p_subpackets = static_cast<block_t**> ( calloc(i_subpackets, sizeof(block_t*)) );
 
     if( unlikely( !p_subpackets ) )
     {
@@ -319,7 +293,7 @@ Cook_PrivateTrackData::~Cook_PrivateTrackData()
         if( p_subpackets[i] )
             block_Release( p_subpackets[i] );
 
-    free( p_subpackets );    
+    free( p_subpackets );
 }
 
 static inline void fill_wvpk_block(uint16_t version, uint32_t block_samples, uint32_t flags,
@@ -338,7 +312,7 @@ static inline void fill_wvpk_block(uint16_t version, uint32_t block_samples, uin
     SetDWLE( dst + 20, block_samples );
     SetDWLE( dst + 24, flags );
     SetDWLE( dst + 28, crc );
-    memcpy( dst + 32, src, srclen ); 
+    memcpy( dst + 32, src, srclen );
 }
 
 block_t * packetize_wavpack( mkv_track_t * p_tk, uint8_t * buffer, size_t  size)
@@ -348,13 +322,13 @@ block_t * packetize_wavpack( mkv_track_t * p_tk, uint8_t * buffer, size_t  size)
     uint32_t flags;
     uint32_t crc;
     block_t * p_block = NULL;
-    
+
     if( p_tk->i_extra_data >= 2 )
         version = GetWLE( p_tk->p_extra_data );
 
     if( size < 12 )
         return NULL;
- 
+
     block_samples = GetDWLE(buffer);
     buffer += 4;
     flags = GetDWLE(buffer);
@@ -376,7 +350,7 @@ block_t * packetize_wavpack( mkv_track_t * p_tk, uint8_t * buffer, size_t  size)
     else
     {
         /* Multiblock */
-        size_t total_size = 0; 
+        size_t total_size = 0;
 
         p_block = block_Alloc( 0 );
         if( !p_block )
@@ -411,4 +385,46 @@ block_t * packetize_wavpack( mkv_track_t * p_tk, uint8_t * buffer, size_t  size)
     }
 
     return p_block;
+}
+
+void MkvTree_va( demux_t& demuxer, int i_level, const char* fmt, va_list args)
+{
+    static char const * indent = "|   ";
+    static char const * prefix = "+ ";
+    static int  const   indent_len = strlen( indent );
+    static int  const   prefix_len = strlen( prefix );
+
+    char   fixed_buffer[256] = {};
+    size_t const  static_len = sizeof( fixed_buffer );
+    char *            buffer = fixed_buffer;
+    size_t         total_len = indent_len * i_level + prefix_len + strlen( fmt );
+
+    if( total_len >= static_len ) {
+        buffer = new (std::nothrow) char[total_len] ();
+
+        if (buffer == NULL) {
+            msg_Err (&demuxer, "Unable to allocate memory for format string");
+            return;
+        }
+    }
+
+    char * dst = buffer;
+
+    for (int i = 0; i < i_level; ++i, dst += indent_len)
+        memcpy( dst, indent, indent_len );
+
+    strcat( dst, prefix );
+    strcat( dst, fmt );
+
+    msg_GenericVa( &demuxer, VLC_MSG_DBG, buffer, args );
+
+    if (buffer != fixed_buffer)
+        delete [] buffer;
+}
+
+void MkvTree( demux_t & demuxer, int i_level, const char *psz_format, ... )
+{
+    va_list args; va_start( args, psz_format );
+    MkvTree_va( demuxer, i_level, psz_format, args );
+    va_end( args );
 }

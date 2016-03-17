@@ -183,7 +183,7 @@ int Chunk::Parse( xml_reader_t *p_xmlReader, string p_node, int p_type){
                         return -1;
                     }
                     if ( this->i_vol_index != 1 ) {
-                        msg_Err(this->p_demux, "Only one VOLINDEX suported. Patch welcome.");
+                        msg_Err(this->p_demux, "Only one VOLINDEX supported. Patch welcome.");
                         return -1;
                     }
                     /* end of chunk tag parse */
@@ -723,22 +723,16 @@ int XmlFile::OpenXml()
 {
     char *psz_uri;
 
-    this->p_xml = xml_Create( this->p_demux );
-    if (! this->p_xml) {
-        return -1;
-    }
     psz_uri = vlc_path2uri( this->s_path.c_str(), "file" );
     this->p_stream = stream_UrlNew(this->p_demux, psz_uri );
     free(psz_uri);
     if( ! this->p_stream ) {
-        xml_Delete(this->p_xml );
         return -1;
     }
 
-    this->p_xmlReader = xml_ReaderCreate( this->p_xml, this->p_stream);
+    this->p_xmlReader = xml_ReaderCreate( this->p_demux, this->p_stream);
     if( ! this->p_xmlReader ) {
         stream_Delete( this->p_stream );
-        xml_Delete(this->p_xml );
         return -1;
     }
     return 0;
@@ -828,9 +822,6 @@ void XmlFile::CloseXml() {
         stream_Delete( this->p_stream );
     if( this->p_xmlReader )
         xml_ReaderDelete( this->p_xmlReader );
-    if( this->p_xml )
-        xml_Delete( this->p_xml );
-
 }
 
 /*

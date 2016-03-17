@@ -149,7 +149,7 @@ static void msg_rc( intf_thread_t *p_intf, const char *psz_fmt, ... )
     if( p_intf->p_sys->i_socket == -1 )
         utf8_vfprintf( stdout, fmt_eol, args );
     else
-        net_vaPrintf( p_intf, p_intf->p_sys->i_socket, NULL, fmt_eol, args );
+        net_vaPrintf( p_intf, p_intf->p_sys->i_socket, fmt_eol, args );
     va_end( args );
 }
 #define msg_rc( ... ) msg_rc( p_intf, __VA_ARGS__ )
@@ -301,7 +301,7 @@ static int Activate( vlc_object_t *p_this )
     {
         vlc_url_t url;
 
-        vlc_UrlParse( &url, psz_host, 0 );
+        vlc_UrlParse( &url, psz_host );
 
         msg_Dbg( p_intf, "base: %s, port: %d", url.psz_host, url.i_port );
 
@@ -524,8 +524,11 @@ static void *Run( void *data )
                 var_AddCallback( p_sys->p_input, "intf-event", InputEvent, p_intf );
             }
         }
-#warning This is not reliable...
-        else if( p_sys->p_input->b_dead )
+
+        int state;
+        if( p_sys->p_input != NULL
+         && ((state = var_GetInteger( p_sys->p_input, "state")) == ERROR_S
+          || state == END_S) )
         {
             var_DelCallback( p_sys->p_input, "intf-event", InputEvent, p_intf );
             vlc_object_release( p_sys->p_input );
@@ -602,30 +605,26 @@ static void *Run( void *data )
         /* If the user typed a registered local command, try it */
         if( var_Type( p_intf, psz_cmd ) & VLC_VAR_ISCOMMAND )
         {
-            vlc_value_t val;
-            int i_ret;
-            val.psz_string = psz_arg;
+            int i_ret = VLC_SUCCESS;
 
             if ((var_Type( p_intf, psz_cmd) & VLC_VAR_CLASS) == VLC_VAR_VOID)
-                i_ret = var_TriggerCallback( p_intf, psz_cmd );
+                var_TriggerCallback( p_intf, psz_cmd );
             else
-                i_ret = var_Set( p_intf, psz_cmd, val );
+                i_ret = var_SetString( p_intf, psz_cmd, psz_arg );
             msg_rc( "%s: returned %i (%s)",
                     psz_cmd, i_ret, vlc_error( i_ret ) );
         }
         /* Or maybe it's a global command */
         else if( var_Type( p_intf->p_libvlc, psz_cmd ) & VLC_VAR_ISCOMMAND )
         {
-            vlc_value_t val;
-            int i_ret;
+            int i_ret = VLC_SUCCESS;
 
-            val.psz_string = psz_arg;
             /* FIXME: it's a global command, but we should pass the
              * local object as an argument, not p_intf->p_libvlc. */
             if ((var_Type( p_intf->p_libvlc, psz_cmd) & VLC_VAR_CLASS) == VLC_VAR_VOID)
-                i_ret = var_TriggerCallback( p_intf, psz_cmd );
+                var_TriggerCallback( p_intf, psz_cmd );
             else
-                i_ret = var_Set( p_intf->p_libvlc, psz_cmd, val );
+                i_ret = var_SetString( p_intf->p_libvlc, psz_cmd, psz_arg );
             if( i_ret != 0 )
             {
                 msg_rc( "%s: returned %i (%s)",
@@ -683,29 +682,17 @@ static void *Run( void *data )
         }
         else if( !strcmp( psz_cmd, "get_time" ) )
         {
-            if( p_sys->p_input == NULL )
-            {
-                msg_rc("0");
-            }
-            else
-            {
-                vlc_value_t time;
-                var_Get( p_sys->p_input, "time", &time );
-                msg_rc( "%"PRIu64, time.i_time / 1000000);
-            }
+            int64_t t = 0;
+            if( p_sys->p_input != NULL )
+                t = var_GetInteger( p_sys->p_input, "time" ) / CLOCK_FREQ;
+            msg_rc( "%"PRIu64, t );
         }
         else if( !strcmp( psz_cmd, "get_length" ) )
         {
-            if( p_sys->p_input == NULL )
-            {
-                msg_rc("0");
-            }
-            else
-            {
-                vlc_value_t time;
-                var_Get( p_sys->p_input, "length", &time );
-                msg_rc( "%"PRIu64, time.i_time / 1000000);
-            }
+            int64_t l = 0;
+            if( p_sys->p_input != NULL )
+                l = var_GetInteger( p_sys->p_input, "length" ) / CLOCK_FREQ;
+            msg_rc( "%"PRIu64, l );
         }
         else if( !strcmp( psz_cmd, "get_title" ) )
         {
@@ -905,7 +892,7 @@ static void PositionChanged( intf_thread_t *p_intf,
     vlc_mutex_lock( &p_intf->p_sys->status_lock );
     if( p_intf->p_sys->b_input_buffering )
         msg_rc( STATUS_CHANGE "( time: %"PRId64"s )",
-                (var_GetTime( p_input, "time" )/1000000) );
+                (var_GetInteger( p_input, "time" ) / CLOCK_FREQ) );
     p_intf->p_sys->b_input_buffering = false;
     vlc_mutex_unlock( &p_intf->p_sys->status_lock );
 }
@@ -983,8 +970,8 @@ static int Input( vlc_object_t *p_this, char const *psz_cmd,
         }
         else
         {
-            mtime_t t = ((int64_t)atoi( newval.psz_string )) * CLOCK_FREQ;
-            var_SetTime( p_input, "time", t );
+            mtime_t t = atoi( newval.psz_string );
+            var_SetInteger( p_input, "time", CLOCK_FREQ * t );
         }
         i_error = VLC_SUCCESS;
     }
@@ -1033,7 +1020,7 @@ static int Input( vlc_object_t *p_this, char const *psz_cmd,
     }
     else if ( !strcmp( psz_cmd, "frame" ) )
     {
-	var_TriggerCallback( p_input, "frame-next" );
+        var_TriggerCallback( p_input, "frame-next" );
         i_error = VLC_SUCCESS;
     }
     else if( !strcmp( psz_cmd, "chapter" ) ||
@@ -1122,18 +1109,15 @@ static int Input( vlc_object_t *p_this, char const *psz_cmd,
         {
             /* get */
             vlc_value_t val, text;
-            int i, i_value;
 
-            if ( var_Get( p_input, psz_variable, &val ) < 0 )
-                goto out;
-            i_value = val.i_int;
+            int i_value = var_GetInteger( p_input, psz_variable );
 
             if ( var_Change( p_input, psz_variable,
                              VLC_VAR_GETCHOICES, &val, &text ) < 0 )
                 goto out;
 
             msg_rc( "+----[ %s ]", val_name.psz_string );
-            for ( i = 0; i < val.p_list->i_count; i++ )
+            for ( int i = 0; i < val.p_list->i_count; i++ )
             {
                 if ( i_value == val.p_list->p_values[i].i_int )
                     msg_rc( "| %"PRId64" - %s *",
@@ -1177,7 +1161,6 @@ static int Playlist( vlc_object_t *p_this, char const *psz_cmd,
                      vlc_value_t oldval, vlc_value_t newval, void *p_data )
 {
     VLC_UNUSED(oldval); VLC_UNUSED(p_data);
-    vlc_value_t val;
 
     intf_thread_t *p_intf = (intf_thread_t*)p_this;
     playlist_t *p_playlist = p_intf->p_sys->p_playlist;
@@ -1212,13 +1195,12 @@ static int Playlist( vlc_object_t *p_this, char const *psz_cmd,
     else if( !strcmp( psz_cmd, "repeat" ) )
     {
         bool b_update = true;
-
-        var_Get( p_playlist, "repeat", &val );
+        bool b_value = var_GetBool( p_playlist, "repeat" );
 
         if( strlen( newval.psz_string ) > 0 )
         {
-            if ( ( !strncmp( newval.psz_string, "on", 2 )  &&  val.b_bool ) ||
-                 ( !strncmp( newval.psz_string, "off", 3 ) && !val.b_bool ) )
+            if ( ( !strncmp( newval.psz_string, "on", 2 )  &&  b_value ) ||
+                 ( !strncmp( newval.psz_string, "off", 3 ) && !b_value ) )
             {
                 b_update = false;
             }
@@ -1226,21 +1208,20 @@ static int Playlist( vlc_object_t *p_this, char const *psz_cmd,
 
         if ( b_update )
         {
-            val.b_bool = !val.b_bool;
-            var_Set( p_playlist, "repeat", val );
+            b_value = !b_value;
+            var_SetBool( p_playlist, "repeat", b_value );
         }
-        msg_rc( "Setting repeat to %d", val.b_bool );
+        msg_rc( "Setting repeat to %s", b_value ? "true" : "false" );
     }
     else if( !strcmp( psz_cmd, "loop" ) )
     {
         bool b_update = true;
-
-        var_Get( p_playlist, "loop", &val );
+        bool b_value = var_GetBool( p_playlist, "loop" );
 
         if( strlen( newval.psz_string ) > 0 )
         {
-            if ( ( !strncmp( newval.psz_string, "on", 2 )  &&  val.b_bool ) ||
-                 ( !strncmp( newval.psz_string, "off", 3 ) && !val.b_bool ) )
+            if ( ( !strncmp( newval.psz_string, "on", 2 )  &&  b_value ) ||
+                 ( !strncmp( newval.psz_string, "off", 3 ) && !b_value ) )
             {
                 b_update = false;
             }
@@ -1248,21 +1229,20 @@ static int Playlist( vlc_object_t *p_this, char const *psz_cmd,
 
         if ( b_update )
         {
-            val.b_bool = !val.b_bool;
-            var_Set( p_playlist, "loop", val );
+            b_value = !b_value;
+            var_SetBool( p_playlist, "loop", b_value );
         }
-        msg_rc( "Setting loop to %d", val.b_bool );
+        msg_rc( "Setting loop to %s", b_value ? "true" : "false" );
     }
     else if( !strcmp( psz_cmd, "random" ) )
     {
         bool b_update = true;
-
-        var_Get( p_playlist, "random", &val );
+        bool b_value = var_GetBool( p_playlist, "random" );
 
         if( strlen( newval.psz_string ) > 0 )
         {
-            if ( ( !strncmp( newval.psz_string, "on", 2 )  &&  val.b_bool ) ||
-                 ( !strncmp( newval.psz_string, "off", 3 ) && !val.b_bool ) )
+            if ( ( !strncmp( newval.psz_string, "on", 2 )  &&  b_value ) ||
+                 ( !strncmp( newval.psz_string, "off", 3 ) && !b_value ) )
             {
                 b_update = false;
             }
@@ -1270,10 +1250,10 @@ static int Playlist( vlc_object_t *p_this, char const *psz_cmd,
 
         if ( b_update )
         {
-            val.b_bool = !val.b_bool;
-            var_Set( p_playlist, "random", val );
+            b_value = !b_value;
+            var_SetBool( p_playlist, "random", b_value );
         }
-        msg_rc( "Setting random to %d", val.b_bool );
+        msg_rc( "Setting random to %s", b_value ? "true" : "false" );
     }
     else if (!strcmp( psz_cmd, "goto" ) )
     {
@@ -1549,13 +1529,12 @@ static int VideoConfig( vlc_object_t *p_this, char const *psz_cmd,
         /* set */
         if( !strcmp( psz_variable, "zoom" ) )
         {
-            vlc_value_t val;
-            val.f_float = atof( newval.psz_string );
-            i_error = var_Set( p_vout, psz_variable, val );
+            float f_float = atof( newval.psz_string );
+            i_error = var_SetFloat( p_vout, psz_variable, f_float );
         }
         else
         {
-            i_error = var_Set( p_vout, psz_variable, newval );
+            i_error = var_SetString( p_vout, psz_variable, newval.psz_string );
         }
     }
     else if( !strcmp( psz_cmd, "snapshot" ) )
@@ -1571,18 +1550,16 @@ static int VideoConfig( vlc_object_t *p_this, char const *psz_cmd,
         float f_value = 0.;
         char *psz_value = NULL;
 
-        if ( var_Get( p_vout, psz_variable, &val ) < 0 )
-        {
-            vlc_object_release( p_vout );
-            return VLC_EGENERIC;
-        }
         if( !strcmp( psz_variable, "zoom" ) )
-        {
-            f_value = val.f_float;
-        }
+            f_value = var_GetFloat( p_vout, "zoom" );
         else
         {
-            psz_value = val.psz_string;
+            psz_value = var_GetString( p_vout, psz_variable );
+            if( psz_value == NULL )
+            {
+                vlc_object_release( p_vout );
+                return VLC_EGENERIC;
+            }
         }
 
         if ( var_Change( p_vout, psz_variable,
@@ -1863,8 +1840,6 @@ static bool ReadWin32( intf_thread_t *p_intf, char *p_buffer, int *pi_size )
 
 bool ReadCommand( intf_thread_t *p_intf, char *p_buffer, int *pi_size )
 {
-    int i_read = 0;
-
 #ifdef _WIN32
     if( p_intf->p_sys->i_socket == -1 && !p_intf->p_sys->b_quiet )
         return ReadWin32( p_intf, p_buffer, pi_size );
@@ -1875,34 +1850,34 @@ bool ReadCommand( intf_thread_t *p_intf, char *p_buffer, int *pi_size )
     }
 #endif
 
-    while( *pi_size < MAX_LINE_LENGTH &&
-           (i_read = net_Read( p_intf, p_intf->p_sys->i_socket == -1 ?
-                       0 /*STDIN_FILENO*/ : p_intf->p_sys->i_socket, NULL,
-                  (uint8_t *)p_buffer + *pi_size, 1, false ) ) > 0 )
+    while( *pi_size < MAX_LINE_LENGTH )
     {
+        if( p_intf->p_sys->i_socket == -1 )
+        {
+            if( read( 0/*STDIN_FILENO*/, p_buffer + *pi_size, 1 ) <= 0 )
+            {   /* Standard input closed: exit */
+                vlc_value_t empty;
+                Quit( VLC_OBJECT(p_intf), NULL, empty, empty, NULL );
+                p_buffer[*pi_size] = 0;
+                return true;
+            }
+        }
+        else
+        {   /* Connection closed */
+            if( net_Read( p_intf, p_intf->p_sys->i_socket, p_buffer + *pi_size,
+                          1 ) <= 0 )
+            {
+                net_Close( p_intf->p_sys->i_socket );
+                p_intf->p_sys->i_socket = -1;
+                p_buffer[*pi_size] = 0;
+                return true;
+            }
+        }
+
         if( p_buffer[ *pi_size ] == '\r' || p_buffer[ *pi_size ] == '\n' )
             break;
 
         (*pi_size)++;
-    }
-
-    /* Connection closed */
-    if( i_read <= 0 )
-    {
-        if( p_intf->p_sys->i_socket != -1 )
-        {
-            net_Close( p_intf->p_sys->i_socket );
-            p_intf->p_sys->i_socket = -1;
-        }
-        else
-        {
-            /* Standard input closed: exit */
-            vlc_value_t empty;
-            Quit( VLC_OBJECT(p_intf), NULL, empty, empty, NULL );
-        }
-
-        p_buffer[ *pi_size ] = 0;
-        return true;
     }
 
     if( *pi_size == MAX_LINE_LENGTH ||

@@ -26,6 +26,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
+#ifdef HAVE_CONFIG_H
+# include "config.h"
+#endif
+
 #include <vector>
 #include <string>
 
@@ -33,6 +37,7 @@
 #include <upnp/upnptools.h>
 
 #include <vlc_common.h>
+#include <vlc_url.h>
 
 namespace SD
 {
@@ -67,6 +72,7 @@ private:
     static UpnpInstanceWrapper* s_instance;
     static vlc_mutex_t s_lock;
     UpnpClient_Handle handle_;
+    vlc_mutex_t callback_lock_; // protect opaque_ and callback_
     SD::MediaServerList* opaque_;
     Upnp_FunPtr callback_;
     int refcount_;
@@ -77,12 +83,15 @@ namespace SD
 
 struct MediaServerDesc
 {
-    MediaServerDesc(const std::string& udn, const std::string& fName, const std::string& loc);
+    MediaServerDesc( const std::string& udn, const std::string& fName,
+                    const std::string& loc, const std::string& iconUrl );
     ~MediaServerDesc();
     std::string UDN;
     std::string friendlyName;
     std::string location;
+    std::string iconUrl;
     input_item_t* inputItem;
+    bool isSatIp;
 };
 
 
@@ -100,6 +109,7 @@ public:
 
 private:
     void parseNewServer( IXML_Document* doc, const std::string& location );
+    std::string getIconURL( IXML_Element* p_device_elem , const char* psz_base_url );
 
 private:
     services_discovery_t* p_sd_;
@@ -112,26 +122,50 @@ private:
 namespace Access
 {
 
+class Upnp_i11e_cb
+{
+public:
+    Upnp_i11e_cb( Upnp_FunPtr callback, void *cookie );
+    ~Upnp_i11e_cb();
+    void waitAndRelease( void );
+    static int run( Upnp_EventType, void *, void *);
+
+private:
+    vlc_sem_t       sem_;
+    vlc_mutex_t     lock_;
+    int             refCount_;
+    Upnp_FunPtr     callback_;
+    void*           cookie_;
+};
+
 class MediaServer
 {
 public:
-    MediaServer( const char* psz_url, access_t* p_access, input_item_node_t* node );
-    bool fetchContents();
+    MediaServer( access_t* p_access );
+    ~MediaServer();
+    input_item_t* getNextItem();
 
 private:
     MediaServer(const MediaServer&);
     MediaServer& operator=(const MediaServer&);
 
-    void addItem(const char* objectID, const char* title);
-    void addItem(const char* title, const char* psz_objectID, const char* psz_subtitles, mtime_t duration, const char* psz_url );
+    void fetchContents();
+    input_item_t* newItem(const char* objectID, const char* title);
+    input_item_t* newItem(const char* title, const char* psz_objectID, mtime_t duration, const char* psz_url );
 
     IXML_Document* _browseAction(const char*, const char*,
             const char*, const char*, const char* );
+    static int sendActionCb( Upnp_EventType, void *, void *);
 
 private:
-    const std::string url_;
+    char* psz_root_;
+    char* psz_objectId_;
     access_t* access_;
-    input_item_node_t* node_;
+    IXML_Document* xmlDocument_;
+    IXML_NodeList* containerNodeList_;
+    unsigned int   containerNodeIndex_;
+    IXML_NodeList* itemNodeList_;
+    unsigned int   itemNodeIndex_;
 };
 
 }

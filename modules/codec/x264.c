@@ -114,7 +114,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
 
 #define B_ADAPT_TEXT N_("Adaptive B-frame decision")
 #define B_ADAPT_LONGTEXT N_( "Force the specified number of " \
-    "consecutive B-frames to be used, except possibly before an I-frame." \
+    "consecutive B-frames to be used, except possibly before an I-frame. " \
     "Range 0 to 2." )
 
 #define B_BIAS_TEXT N_("Influence (bias) B-frames usage")
@@ -298,7 +298,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
     " - 2: Smart analysis\n" )
 
 #define ME_TEXT N_("Integer pixel motion estimation method")
-#define ME_LONGTEXT N_( "Selects the motion estimation algorithm: "\
+#define ME_LONGTEXT N_( "Selects the motion estimation algorithm:\n"\
     " - dia: diamond search, radius 1 (fast)\n" \
     " - hex: hexagonal search, radius 2\n" \
     " - umh: uneven multi-hexagon search (better but slower)\n" \
@@ -418,7 +418,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
 #define TUNE_TEXT N_("Default tune setting used" )
 #define PRESET_TEXT N_("Default preset setting used" )
 
-#define X264_OPTIONS_TEXT N_("x264 advanced options.")
+#define X264_OPTIONS_TEXT N_("x264 advanced options")
 #define X264_OPTIONS_LONGTEXT N_("x264 advanced options, in the form {opt=val,op2=val2} .")
 
 static const char *const enc_me_list[] =
@@ -854,7 +854,7 @@ static int  Open ( vlc_object_t *p_this )
 # ifdef MODULE_NAME_IS_x26410b
         if( mask == 0)
         {
-            msg_Err( p_enc, "Only high bith depth encoding supported, bit depth:%d", x264_bit_depth);
+            msg_Err( p_enc, "Only high bit depth encoding supported, bit depth:%d", x264_bit_depth);
             return VLC_EGENERIC;
         }
 # endif

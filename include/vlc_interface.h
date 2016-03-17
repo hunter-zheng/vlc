@@ -33,15 +33,11 @@ extern "C" {
 typedef struct intf_dialog_args_t intf_dialog_args_t;
 
 /**
- * \file
- * This file contains structures and function prototypes for
- * interface management in vlc
- */
-
-/**
- * \defgroup vlc_interface Interface
- * These functions and structures are for interface management
+ * \defgroup interface Interface
+ * VLC user interfaces
  * @{
+ * \file
+ * VLC user interface modules
  */
 
 typedef struct intf_sys_t intf_sys_t;
@@ -115,7 +111,7 @@ VLC_API void vlc_LogSet(libvlc_int_t *, vlc_log_cb cb, void *data);
 /*@}*/
 
 /* Interface dialog ids for dialog providers */
-typedef enum vlc_dialog {
+typedef enum vlc_intf_dialog {
     INTF_DIALOG_FILE_SIMPLE = 1,
     INTF_DIALOG_FILE,
     INTF_DIALOG_DISC,
@@ -147,18 +143,18 @@ typedef enum vlc_dialog {
     INTF_DIALOG_VLM,
 
     INTF_DIALOG_EXIT = 99
-} vlc_dialog_t;
+} vlc_intf_dialog;
 
 /* Useful text messages shared by interfaces */
 #define INTF_ABOUT_MSG LICENSE_MSG
 
 #define EXTENSIONS_AUDIO_CSV "3ga", "669", "a52", "aac", "ac3", "adt", "adts", "aif", "aifc", "aiff", \
-                         "amr", "aob", "ape", "au", "awb", "caf", "dts", "flac", "it", "kar", \
+                         "amb", "amr", "aob", "ape", "au", "awb", "caf", "dts", "flac", "it", "kar", \
                          "m4a", "m4b", "m4p", "m5p", "mka", "mlp", "mod", "mpa", "mp1", "mp2", "mp3", "mpc", "mpga", "mus", \
                          "oga", "ogg", "oma", "opus", "qcp", "ra", "rmi", "s3m", "sid", "spx", "tak", "thd", "tta", \
                          "voc", "vqf", "w64", "wav", "wma", "wv", "xa", "xm"
 
-#define EXTENSIONS_VIDEO_CSV "3g2", "3gp", "3gp2", "3gpp", "amv", "asf", "avi", "bik", "divx", "drc", "dv", \
+#define EXTENSIONS_VIDEO_CSV "3g2", "3gp", "3gp2", "3gpp", "amv", "asf", "avi", "bik", "crf", "divx", "drc", "dv", \
                              "evo", "f4v", "flv", "gvi", "gxf", "iso", \
                              "m1v", "m2v", "m2t", "m2ts", "m4v", "mkv", "mov",\
                              "mp2", "mp2v", "mp4", "mp4v", "mpe", "mpeg", "mpeg1", \
@@ -178,6 +174,7 @@ typedef enum vlc_dialog {
     "*.aif;"\
     "*.aifc;"\
     "*.aiff;"\
+    "*.amb;" \
     "*.amr;" \
     "*.aob;" \
     "*.ape;" \
@@ -225,7 +222,7 @@ typedef enum vlc_dialog {
     "*.xa;"  \
     "*.xm"
 
-#define EXTENSIONS_VIDEO "*.3g2;*.3gp;*.3gp2;*.3gpp;*.amv;*.asf;*.avi;*.bik;*.bin;*.divx;*.drc;*.dv;*.evo;*.f4v;*.flv;*.gvi;*.gxf;*.iso;*.m1v;*.m2v;" \
+#define EXTENSIONS_VIDEO "*.3g2;*.3gp;*.3gp2;*.3gpp;*.amv;*.asf;*.avi;*.bik;*.bin;*.crf;*.divx;*.drc;*.dv;*.evo;*.f4v;*.flv;*.gvi;*.gxf;*.iso;*.m1v;*.m2v;" \
                          "*.m2t;*.m2ts;*.m4v;*.mkv;*.mov;*.mp2;*.mp2v;*.mp4;*.mp4v;*.mpe;*.mpeg;*.mpeg1;" \
                          "*.mpeg2;*.mpeg4;*.mpg;*.mpv2;*.mts;*.mtv;*.mxf;*.mxg;*.nsv;*.nuv;" \
                          "*.ogg;*.ogm;*.ogv;*.ogx;*.ps;" \
@@ -243,10 +240,10 @@ typedef enum vlc_dialog {
                             "*.rt;*.smi;*.txt;" \
                             "*.smil;*.stl;*.usf;" \
                             "*.dks;*.pjs;*.mpl2;*.mks;" \
-                            "*.vtt"
+                            "*.vtt;*.ttml;*.dfxp;"
 
-/** \defgroup vlc_interaction Interaction
- * \ingroup vlc_interface
+/** \defgroup interaction Interaction
+ * \ingroup interface
  * Interaction between user and modules
  * @{
  */

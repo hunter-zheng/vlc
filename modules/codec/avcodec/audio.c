@@ -36,12 +36,13 @@
 #include <vlc_codec.h>
 #include <vlc_avcodec.h>
 
+#include "avcodec.h"
+
 #include <libavcodec/avcodec.h>
 #include <libavutil/mem.h>
 
-#include <libavutil/audioconvert.h>
+#include <libavutil/channel_layout.h>
 
-#include "avcodec.h"
 
 /*****************************************************************************
  * decoder_sys_t : decoder descriptor
@@ -70,6 +71,7 @@ struct decoder_sys_t
 
 static void SetupOutputFormat( decoder_t *p_dec, bool b_trust );
 static block_t *DecodeAudio( decoder_t *, block_t ** );
+static void Flush( decoder_t * );
 
 static void InitDecoderConfig( decoder_t *p_dec, AVCodecContext *p_context )
 {
@@ -151,7 +153,6 @@ static int OpenAudioCodec( decoder_t *p_dec )
 /**
  * Allocates decoded audio buffer for libavcodec to use.
  */
-#if (LIBAVCODEC_VERSION_MAJOR >= 55)
 typedef struct
 {
     block_t self;
@@ -186,49 +187,6 @@ static block_t *vlc_av_frame_Wrap(AVFrame *frame)
     b->frame = frame;
     return block;
 }
-#else
-static int GetAudioBuf( AVCodecContext *ctx, AVFrame *buf )
-{
-    block_t *block;
-    bool planar = av_sample_fmt_is_planar( ctx->sample_fmt );
-    unsigned channels = planar ? 1 : ctx->channels;
-    unsigned planes = planar ? ctx->channels : 1;
-
-    int bytes = av_samples_get_buffer_size( &buf->linesize[0], channels,
-                                            buf->nb_samples, ctx->sample_fmt,
-                                            16 );
-    assert( bytes >= 0 );
-    block = block_Alloc( bytes * planes );
-    if( unlikely(block == NULL) )
-        return AVERROR(ENOMEM);
-
-    block->i_nb_samples = buf->nb_samples;
-    buf->opaque = block;
-
-    if( planes > AV_NUM_DATA_POINTERS )
-    {
-        uint8_t **ext = malloc( sizeof( *ext ) * planes );
-        if( unlikely(ext == NULL) )
-        {
-            block_Release( block );
-            return AVERROR(ENOMEM);
-        }
-        buf->extended_data = ext;
-    }
-    else
-        buf->extended_data = buf->data;
-
-    uint8_t *buffer = block->p_buffer;
-    for( unsigned i = 0; i < planes; i++ )
-    {
-        buf->linesize[i] = buf->linesize[0];
-        buf->extended_data[i] = buffer;
-        buffer += bytes;
-    }
-
-    return 0;
-}
-#endif
 
 /*****************************************************************************
  * InitAudioDec: initialize audio decoder
@@ -246,11 +204,7 @@ int InitAudioDec( decoder_t *p_dec, AVCodecContext *p_context,
         return VLC_ENOMEM;
     }
 
-#if (LIBAVCODEC_VERSION_MAJOR >= 55)
     p_context->refcounted_frames = true;
-#else
-    p_context->get_buffer = GetAudioBuf;
-#endif
     p_sys->p_context = p_context;
     p_sys->p_codec = p_codec;
     p_sys->b_delayed_open = true;
@@ -282,7 +236,24 @@ int InitAudioDec( decoder_t *p_dec, AVCodecContext *p_context,
         date_Init( &p_sys->end_date, p_dec->fmt_in.audio.i_rate, 1 );
 
     p_dec->pf_decode_audio = DecodeAudio;
+    p_dec->pf_flush        = Flush;
     return VLC_SUCCESS;
+}
+
+/*****************************************************************************
+ * Flush:
+ *****************************************************************************/
+static void Flush( decoder_t *p_dec )
+{
+    decoder_sys_t *p_sys = p_dec->p_sys;
+    AVCodecContext *ctx = p_sys->p_context;
+
+    avcodec_flush_buffers( ctx );
+    date_Set( &p_sys->end_date, VLC_TS_INVALID );
+
+    if( ctx->codec_id == AV_CODEC_ID_MP2 ||
+        ctx->codec_id == AV_CODEC_ID_MP3 )
+        p_sys->i_reject_count = 3;
 }
 
 /*****************************************************************************
@@ -292,6 +263,7 @@ static block_t *DecodeAudio( decoder_t *p_dec, block_t **pp_block )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
     AVCodecContext *ctx = p_sys->p_context;
+    AVFrame *frame = NULL;
 
     if( !pp_block || !*pp_block )
         return NULL;
@@ -307,16 +279,15 @@ static block_t *DecodeAudio( decoder_t *p_dec, block_t **pp_block )
     if( p_sys->b_delayed_open )
         goto end;
 
-    if( p_block->i_flags & (BLOCK_FLAG_DISCONTINUITY|BLOCK_FLAG_CORRUPTED) )
+    if( p_block->i_flags & BLOCK_FLAG_CORRUPTED )
     {
-        avcodec_flush_buffers( ctx );
-        date_Set( &p_sys->end_date, VLC_TS_INVALID );
-
-        if( ctx->codec_id == AV_CODEC_ID_MP2 ||
-            ctx->codec_id == AV_CODEC_ID_MP3 )
-            p_sys->i_reject_count = 3;
-
+        Flush( p_dec );
         goto end;
+    }
+
+    if( p_block->i_flags & BLOCK_FLAG_DISCONTINUITY )
+    {
+        date_Set( &p_sys->end_date, VLC_TS_INVALID );
     }
 
     /* We've just started the stream, wait for the first PTS. */
@@ -338,13 +309,9 @@ static block_t *DecodeAudio( decoder_t *p_dec, block_t **pp_block )
         p_block->i_flags |= BLOCK_FLAG_PRIVATE_REALLOCATED;
     }
 
-#if (LIBAVCODEC_VERSION_MAJOR >= 55)
-    AVFrame *frame = av_frame_alloc();
+    frame = av_frame_alloc();
     if (unlikely(frame == NULL))
         goto end;
-#else
-    AVFrame *frame = &(AVFrame) { };
-#endif
 
     for( int got_frame = 0; !got_frame; )
     {
@@ -365,6 +332,9 @@ static block_t *DecodeAudio( decoder_t *p_dec, block_t **pp_block )
         }
 
         assert( p_block->i_buffer >= (unsigned)used );
+        if( (unsigned)used > p_block->i_buffer )
+            used = p_block->i_buffer;
+
         p_block->p_buffer += used;
         p_block->i_buffer -= used;
     }
@@ -391,17 +361,13 @@ static block_t *DecodeAudio( decoder_t *p_dec, block_t **pp_block )
         *pp_block = NULL;
     }
 
-#if (LIBAVCODEC_VERSION_MAJOR < 55)
     /* NOTE WELL: Beyond this point, p_block refers to the DECODED block! */
-    p_block = frame->opaque;
-#endif
     SetupOutputFormat( p_dec, true );
     if( decoder_UpdateAudioFormat( p_dec ) )
         goto drop;
 
     /* Interleave audio if required */
     if( av_sample_fmt_is_planar( ctx->sample_fmt ) )
-#if (LIBAVCODEC_VERSION_MAJOR >= 55)
     {
         p_block = block_Alloc(frame->linesize[0] * ctx->channels);
         if (unlikely(p_block == NULL))
@@ -421,26 +387,8 @@ static block_t *DecodeAudio( decoder_t *p_dec, block_t **pp_block )
         p_block = vlc_av_frame_Wrap(frame);
         if (unlikely(p_block == NULL))
             goto drop;
+        frame = NULL;
     }
-#else
-    {
-        block_t *p_buffer = block_Alloc( p_block->i_buffer );
-        if( unlikely(p_buffer == NULL) )
-            goto drop;
-
-        const void *planes[ctx->channels];
-        for( int i = 0; i < ctx->channels; i++)
-            planes[i] = frame->extended_data[i];
-
-        aout_Interleave( p_buffer->p_buffer, planes, frame->nb_samples,
-                         ctx->channels, p_dec->fmt_out.audio.i_format );
-        if( ctx->channels > AV_NUM_DATA_POINTERS )
-            free( frame->extended_data );
-        block_Release( p_block );
-        p_block = p_buffer;
-    }
-    p_block->i_nb_samples = frame->nb_samples;
-#endif
 
     if (p_sys->b_extract)
     {   /* TODO: do not drop channels... at least not here */
@@ -475,6 +423,7 @@ static block_t *DecodeAudio( decoder_t *p_dec, block_t **pp_block )
 end:
     *pp_block = NULL;
 drop:
+    av_frame_free(&frame);
     if( p_block != NULL )
         block_Release(p_block);
     return NULL;

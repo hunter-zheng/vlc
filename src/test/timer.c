@@ -22,12 +22,13 @@
 # include "config.h"
 #endif
 
-#include <vlc_common.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #undef NDEBUG
 #include <assert.h>
+
+#include <vlc_common.h>
+#undef msleep
 
 struct timer_data
 {
@@ -56,10 +57,21 @@ int main (void)
 
     val = vlc_timer_create (&data.timer, callback, &data);
     assert (val == 0);
+    vlc_timer_destroy (data.timer);
+    assert (data.count == 0);
+
+    val = vlc_timer_create (&data.timer, callback, &data);
+    assert (val == 0);
+    vlc_timer_schedule (data.timer, false, CLOCK_FREQ << 20, CLOCK_FREQ);
+    vlc_timer_destroy (data.timer);
+    assert (data.count == 0);
+
+    val = vlc_timer_create (&data.timer, callback, &data);
+    assert (val == 0);
 
     /* Relative timer */
-    vlc_timer_schedule (data.timer, false, 1, CLOCK_FREQ / 10);
-    msleep (CLOCK_FREQ);
+    vlc_timer_schedule (data.timer, false, 1, CLOCK_FREQ / 100);
+    msleep (CLOCK_FREQ / 10);
     vlc_mutex_lock (&data.lock);
     data.count += vlc_timer_getoverrun (data.timer);
     printf ("Count = %u\n", data.count);
@@ -71,8 +83,8 @@ int main (void)
     /* Absolute timer */
     mtime_t now = mdate ();
 
-    vlc_timer_schedule (data.timer, true, now, CLOCK_FREQ / 10);
-    msleep (CLOCK_FREQ);
+    vlc_timer_schedule (data.timer, true, now, CLOCK_FREQ / 100);
+    msleep (CLOCK_FREQ / 10);
     vlc_mutex_lock (&data.lock);
     data.count += vlc_timer_getoverrun (data.timer);
     printf ("Count = %u\n", data.count);

@@ -24,43 +24,22 @@
 #ifndef PERIOD_H_
 #define PERIOD_H_
 
-#include <vector>
-#include <string>
-
-#include "mpd/AdaptationSet.h"
-#include "mpd/ICanonicalUrl.hpp"
-#include "mpd/SegmentInformation.hpp"
-#include "Properties.hpp"
-#include "Streams.hpp"
+#include "../adaptive/playlist/BasePeriod.h"
+#include "../adaptive/playlist/SegmentInformation.hpp"
 
 namespace dash
 {
     namespace mpd
     {
         class MPD;
+        using namespace adaptive;
+        using namespace adaptive::playlist;
 
-        class Period : public SegmentInformation,
-                       public UniqueNess<Period>
+        class Period : public BasePeriod
         {
             public:
                 Period(MPD *);
                 virtual ~Period ();
-
-                const std::vector<AdaptationSet *>& getAdaptationSets   () const;
-                const std::vector<AdaptationSet *>  getAdaptationSets   (Streams::Type) const;
-                AdaptationSet *                     getAdaptationSet    (Streams::Type) const;
-                void                                addAdaptationSet    (AdaptationSet *AdaptationSet);
-                std::vector<std::string>            toString            (int = 0) const;
-
-                virtual Url getUrlSegment() const; /* reimpl */
-                virtual mtime_t getPeriodStart() const; /* reimpl */
-
-                Property<Url *> baseUrl;
-                Property<mtime_t> duration;
-                Property<mtime_t> startTime;
-
-            private:
-                std::vector<AdaptationSet *>    adaptationSets;
         };
     }
 }

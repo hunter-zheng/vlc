@@ -217,6 +217,8 @@ error:
 static module_t *CacheLoadModule (FILE *file)
 {
     module_t *module = vlc_module_create (NULL);
+    if (unlikely(module == NULL))
+        return NULL;
 
     /* Load additional infos */
     LOAD_STRING(module->psz_shortname);
@@ -274,7 +276,8 @@ static module_t *CacheLoadModule (FILE *file)
 
     return module;
 error:
-    return NULL; /* FIXME: leaks */
+    vlc_module_destroy(module);
+    return NULL;
 }
 
 /**
@@ -359,6 +362,7 @@ size_t CacheLoad( vlc_object_t *p_this, const char *dir, module_cache_t **r )
 
     module_cache_t *cache = NULL;
     size_t count = 0;
+    char *path = NULL;
 
     for (;;)
     {
@@ -370,7 +374,6 @@ size_t CacheLoad( vlc_object_t *p_this, const char *dir, module_cache_t **r )
             goto error;
         }
 
-        char *path;
         struct stat st;
 
         /* Load common info */
@@ -382,6 +385,7 @@ size_t CacheLoad( vlc_object_t *p_this, const char *dir, module_cache_t **r )
 
         CacheAdd (&cache, &count, path, &st, module);
         free (path);
+        path = NULL;
         /* TODO: deal with errors */
     }
 
@@ -391,6 +395,7 @@ size_t CacheLoad( vlc_object_t *p_this, const char *dir, module_cache_t **r )
     return count;
 
 error:
+    free( path );
     if (ferror (file))
         msg_Err(p_this, "plugins cache read error: %s", vlc_strerror_c(errno));
     msg_Warn( p_this, "plugins cache not loaded (corrupted)" );

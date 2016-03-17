@@ -25,6 +25,7 @@
 # include "config.h"
 #endif
 
+#include <assert.h>
 #include <math.h>
 #include <vlc_common.h>
 #include <vlc_plugin.h>
@@ -441,16 +442,20 @@ static int TimeGet(audio_output_t *aout, mtime_t *restrict delay)
 {
     aout_sys_t *sys = aout->sys;
     pa_stream *s = sys->stream;
+    int ret = -1;
 
-    if (pa_stream_is_corked(s) > 0)
-        return -1; /* latency is irrelevant if corked */
-
-    mtime_t delta = vlc_pa_get_latency(aout, sys->context, s);
-    if (delta == VLC_TS_INVALID)
-        return -1;
-
-    *delay = delta;
-    return 0;
+    pa_threaded_mainloop_lock(sys->mainloop);
+    if (pa_stream_is_corked(s) <= 0)
+    {   /* latency is relevant only if not corked */
+        mtime_t delta = vlc_pa_get_latency(aout, sys->context, s);
+        if (delta != VLC_TS_INVALID)
+        {
+            *delay = delta;
+            ret = 0;
+        }
+    }
+    pa_threaded_mainloop_unlock(sys->mainloop);
+    return ret;
 }
 
 /* Memory free callback. The block_t address is in front of the data. */
@@ -561,6 +566,9 @@ static void Flush(audio_output_t *aout, bool wait)
         op = pa_stream_flush(s, NULL, NULL);
     if (op != NULL)
         pa_operation_unref(op);
+    sys->first_pts = VLC_TS_INVALID;
+    stream_stop(s, aout);
+
     pa_threaded_mainloop_unlock(sys->mainloop);
 }
 
@@ -761,6 +769,8 @@ static int Start(audio_output_t *aout, audio_sample_format_t *restrict fmt)
     if (fmt->i_physical_channels & AOUT_CHAN_LFE)
         map.map[map.channels++] = PA_CHANNEL_POSITION_LFE;
     fmt->i_original_channels = fmt->i_physical_channels;
+
+    static_assert(AOUT_CHAN_MAX == 9, "Missing channels");
 
     for (unsigned i = 0; map.channels < ss.channels; i++) {
         map.map[map.channels++] = PA_CHANNEL_POSITION_AUX0 + i;

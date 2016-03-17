@@ -154,6 +154,7 @@ enum vlc_module_properties
 #define SUBCAT_VIDEO_VOUT 302
 #define SUBCAT_VIDEO_VFILTER 303
 #define SUBCAT_VIDEO_SUBPIC 305
+#define SUBCAT_VIDEO_SPLITTER 306
 
 #define CAT_INPUT 4
 #define SUBCAT_INPUT_GENERAL 401
@@ -233,7 +234,7 @@ enum vlc_module_properties
 #   define EXTERN_SYMBOL
 #endif
 
-typedef int (*vlc_set_cb) (void *, void *, int, ...);
+EXTERN_SYMBOL typedef int (*vlc_set_cb) (void *, void *, int, ...);
 
 #define vlc_plugin_set(...) vlc_set (opaque,   NULL, __VA_ARGS__)
 #define vlc_module_set(...) vlc_set (opaque, module, __VA_ARGS__)
@@ -484,9 +485,6 @@ VLC_METADATA_EXPORTS
 #define change_float_range( minv, maxv ) \
     vlc_config_set (VLC_CONFIG_RANGE, (double)(minv), (double)(maxv));
 
-#define change_action_add( pf_action, text ) \
-    (void)(pf_action, text);
-
 /* For options that are saved but hidden from the preferences panel */
 #define change_private() \
     vlc_config_set (VLC_CONFIG_PRIVATE);
@@ -536,9 +534,13 @@ VLC_METADATA_EXPORTS
 
 #ifdef VLC_MODULE_COPYRIGHT
 # define VLC_COPYRIGHT_EXPORT VLC_META_EXPORT(copyright, VLC_MODULE_COPYRIGHT)
+#else
+# define VLC_COPYRIGHT_EXPORT
 #endif
 #ifdef VLC_MODULE_LICENSE
 # define VLC_LICENSE_EXPORT VLC_META_EXPORT(license, VLC_MODULE_LICENSE)
+#else
+# define VLC_LICENSE_EXPORT
 #endif
 
 #define VLC_METADATA_EXPORTS \

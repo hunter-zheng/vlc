@@ -19,6 +19,7 @@ FFMPEGCONF = \
 	--pkg-config="$(PKG_CONFIG)" \
 	--disable-doc \
 	--disable-encoder=vorbis \
+	--disable-decoder=opus \
 	--enable-libgsm \
 	--enable-libopenjpeg \
 	--disable-debug \
@@ -26,6 +27,7 @@ FFMPEGCONF = \
 	--disable-devices \
 	--disable-avfilter \
 	--disable-filters \
+	--disable-protocol=concat \
 	--disable-bsfs \
 	--disable-bzlib \
 	--disable-avresample
@@ -34,6 +36,10 @@ ifdef USE_FFMPEG
 FFMPEGCONF += \
 	--disable-swresample \
 	--disable-iconv
+ifdef HAVE_DARWIN_OS
+FFMPEGCONF += \
+	--disable-videotoolbox
+endif
 endif
 
 DEPS_ffmpeg = zlib gsm openjpeg
@@ -134,18 +140,29 @@ FFMPEGCONF += --target-os=linux --enable-pic
 
 endif
 
+ifdef HAVE_ANDROID
+ifeq ($(ANDROID_ABI), x86)
+FFMPEGCONF +=  --disable-mmx --disable-mmxext
+endif
+endif
+
 # Windows
 ifdef HAVE_WIN32
+ifndef HAVE_VISUALSTUDIO
+DEPS_ffmpeg += d3d11
 ifndef HAVE_MINGW_W64
 DEPS_ffmpeg += directx
+endif
 endif
 FFMPEGCONF += --target-os=mingw32 --enable-memalign-hack
 FFMPEGCONF += --enable-w32threads --enable-dxva2
 
 ifdef HAVE_WIN64
 FFMPEGCONF += --cpu=athlon64 --arch=x86_64
-else # !WIN64
+else
+ifeq ($(ARCH),i386) # 32bits intel
 FFMPEGCONF+= --cpu=i686 --arch=x86
+endif
 endif
 
 else # !Windows
@@ -162,7 +179,7 @@ endif
 
 # Build
 PKGS += ffmpeg
-ifeq ($(call need_pkg,"libavcodec >= 54.25.0 libavformat >= 53.21.0 libswscale"),)
+ifeq ($(call need_pkg,"libavcodec >= 55.0.0 libavformat >= 53.21.0 libswscale"),)
 PKGS_FOUND += ffmpeg
 endif
 

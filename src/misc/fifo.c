@@ -111,6 +111,15 @@ void vlc_fifo_WaitCond(vlc_fifo_t *fifo, vlc_cond_t *condvar)
 }
 
 /**
+ * Atomically unlocks the FIFO and waits until one thread signals the FIFO up
+ * to a certain date, then locks the FIFO again. See vlc_fifo_Wait().
+ */
+int vlc_fifo_TimedWaitCond(vlc_fifo_t *fifo, vlc_cond_t *condvar, mtime_t deadline)
+{
+    return vlc_cond_timedwait(condvar, &fifo->lock, deadline);
+}
+
+/**
  * Checks how many blocks are queued in a locked FIFO.
  *
  * @note This function is not cancellation point.
@@ -171,7 +180,7 @@ void vlc_fifo_QueueUnlocked(block_fifo_t *fifo, block_t *block)
         block = block->p_next;
     }
 
-    vlc_cond_signal(&fifo->wait);
+    vlc_fifo_Signal(fifo);
 }
 
 /**
@@ -294,7 +303,7 @@ void block_FifoPut(block_fifo_t *fifo, block_t *block)
  * Dequeue the first block from the FIFO. If necessary, wait until there is
  * one block in the queue. This function is (always) cancellation point.
  *
- * @return a valid block, or NULL if block_FifoWake() was called.
+ * @return a valid block
  */
 block_t *block_FifoGet(block_fifo_t *fifo)
 {
@@ -317,12 +326,12 @@ block_t *block_FifoGet(block_fifo_t *fifo)
 
 /**
  * Peeks the first block in the FIFO.
- * If necessary, wait until there is one block.
- * This function is (always) a cancellation point.
  *
  * @warning This function leaves the block in the FIFO.
  * You need to protect against concurrent threads who could dequeue the block.
  * Preferrably, there should be only one thread reading from the FIFO.
+ *
+ * @warning This function is undefined if the FIFO is empty.
  *
  * @return a valid block.
  */
@@ -330,17 +339,11 @@ block_t *block_FifoShow( block_fifo_t *p_fifo )
 {
     block_t *b;
 
-    vlc_testcancel( );
-
     vlc_mutex_lock( &p_fifo->lock );
-    mutex_cleanup_push( &p_fifo->lock );
-
-    while( p_fifo->p_first == NULL )
-        vlc_cond_wait( &p_fifo->wait, &p_fifo->lock );
-
+    assert(p_fifo->p_first != NULL);
     b = p_fifo->p_first;
+    vlc_mutex_unlock( &p_fifo->lock );
 
-    vlc_cleanup_run ();
     return b;
 }
 

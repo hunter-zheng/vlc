@@ -68,6 +68,7 @@ endif
 
 libaccess_archive_plugin_la_SOURCES = access/archive/access.c access/archive/stream.c \
 					access/archive/archive.h access/archive/archive.c
+libaccess_archive_plugin_la_CFLAGS = $(AM_CFLAGS) $(ARCHIVE_CFLAGS)
 libaccess_archive_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
 libaccess_archive_plugin_la_LIBADD = $(ARCHIVE_LIBS)
 access_LTLIBRARIES += $(LTLIBaccess_archive)
@@ -154,7 +155,7 @@ access_LTLIBRARIES += $(LTLIBlinsys_hdsdi) $(LTLIBlinsys_sdi)
 EXTRA_LTLIBRARIES += liblinsys_hdsdi_plugin.la liblinsys_sdi_plugin.la
 
 libdecklink_plugin_la_SOURCES = access/decklink.cpp access/sdi.c access/sdi.h
-libdecklink_plugin_la_CXXFLAGS = $(AM_CFLAGS) $(CPPFLAGS_decklink)
+libdecklink_plugin_la_CXXFLAGS = $(AM_CXXFLAGS) $(CPPFLAGS_decklink)
 libdecklink_plugin_la_LIBADD = $(LIBS_decklink) $(LIBDL) -lpthread
 if HAVE_DECKLINK
 access_LTLIBRARIES += libdecklink_plugin.la
@@ -163,13 +164,6 @@ endif
 libshm_plugin_la_SOURCES = access/shm.c
 libshm_plugin_la_LIBADD = $(LIBM)
 access_LTLIBRARIES += libshm_plugin.la
-
-libqtcapture_plugin_la_SOURCES = access/qtcapture.m
-libqtcapture_plugin_la_LDFLAGS = \
-	-Wl,-framework,QTKit -Wl,-framework,CoreVideo -Wl,-framework,QuartzCore
-if HAVE_QTKIT
-access_LTLIBRARIES += libqtcapture_plugin.la
-endif
 
 libv4l2_plugin_la_SOURCES = \
 	access/v4l2/linux/videodev2.h \
@@ -278,24 +272,7 @@ endif
 EXTRA_LTLIBRARIES += libvcd_plugin.la
 access_LTLIBRARIES += $(LTLIBvcd)
 
-libvcdx_plugin_la_SOURCES = \
-	access/vcdx/access.h access/vcdx/access.c \
-	access/vcdx/vcd.c access/vcdx/vcd.h \
-	access/vcdx/vcdplayer.h access/vcdx/vcdplayer.c \
-	access/vcdx/info.c access/vcdx/info.h
-libvcdx_plugin_la_CPPFLAGS = $(AM_CPPFLAGS)
-libvcdx_plugin_la_LIBADD = $(VCDX_LIBS)
-if HAVE_WIN32
-libvcdx_plugin_la_LIBADD += -lwinmm
-endif
-libvcdx_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
-if HAVE_DARWIN
-libvcdx_plugin_la_LDFLAGS += -Wl,-framework,IOKit,-framework,CoreFoundation
-endif
-EXTRA_LTLIBRARIES += libvcdx_plugin.la
-access_LTLIBRARIES += $(LTLIBvcdx)
-
-libdvdnav_plugin_la_SOURCES = access/dvdnav.c ../demux/mpeg/ps.h ../demux/mpeg/pes.h
+libdvdnav_plugin_la_SOURCES = access/dvdnav.c demux/mpeg/ps.h demux/mpeg/pes.h
 libdvdnav_plugin_la_CFLAGS = $(AM_CFLAGS) $(DVDNAV_CFLAGS)
 libdvdnav_plugin_la_LIBADD = $(DVDNAV_LIBS)
 libdvdnav_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
@@ -305,7 +282,7 @@ endif
 access_LTLIBRARIES += $(LTLIBdvdnav)
 EXTRA_LTLIBRARIES += libdvdnav_plugin.la
 
-libdvdread_plugin_la_SOURCES = access/dvdread.c ../demux/mpeg/ps.h ../demux/mpeg/pes.h
+libdvdread_plugin_la_SOURCES = access/dvdread.c demux/mpeg/ps.h demux/mpeg/pes.h
 libdvdread_plugin_la_CFLAGS = $(AM_CFLAGS) $(DVDREAD_CFLAGS)
 libdvdread_plugin_la_LIBADD = $(DVDREAD_LIBS)
 libdvdread_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
@@ -390,9 +367,6 @@ access_LTLIBRARIES += libftp_plugin.la
 
 libhttp_plugin_la_SOURCES = access/http.c
 libhttp_plugin_la_LIBADD = $(SOCKET_LIBS)
-if HAVE_ZLIB
-libhttp_plugin_la_LIBADD += -lz
-endif
 access_LTLIBRARIES += libhttp_plugin.la
 
 liblive555_plugin_la_SOURCES = access/live555.cpp access/mms/asf.c access/mms/buffer.c
@@ -414,7 +388,7 @@ libaccess_mms_plugin_la_CFLAGS = $(AM_CFLAGS)
 libaccess_mms_plugin_la_LIBADD = $(SOCKET_LIBS)
 access_LTLIBRARIES += libaccess_mms_plugin.la
 
-libsmb_plugin_la_SOURCES = access/smb.c
+libsmb_plugin_la_SOURCES = access/smb.c access/smb_common.h
 libsmb_plugin_la_CFLAGS = $(AM_CFLAGS) $(SMBCLIENT_CFLAGS)
 libsmb_plugin_la_LIBADD = $(SMBCLIENT_LIBS)
 if HAVE_WIN32
@@ -424,7 +398,7 @@ libsmb_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
 access_LTLIBRARIES += $(LTLIBsmb)
 EXTRA_LTLIBRARIES += libsmb_plugin.la
 
-libdsm_plugin_la_SOURCES = access/dsm/access.c access/dsm/sd.c
+libdsm_plugin_la_SOURCES = access/dsm/access.c access/dsm/sd.c access/smb_common.h
 libdsm_plugin_la_CFLAGS = $(AM_CFLAGS) $(DSM_CFLAGS)
 libdsm_plugin_la_LIBADD = $(DSM_LIBS)
 libdsm_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
@@ -445,6 +419,13 @@ libsftp_plugin_la_LIBADD = $(SFTP_LIBS)
 libsftp_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
 access_LTLIBRARIES += $(LTLIBsftp)
 EXTRA_LTLIBRARIES += libsftp_plugin.la
+
+libnfs_plugin_la_SOURCES = access/nfs.c
+libnfs_plugin_la_CFLAGS = $(AM_CFLAGS) $(NFS_CFLAGS)
+libnfs_plugin_la_LIBADD = $(NFS_LIBS) $(SOCKET_LIBS)
+libnfs_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
+access_LTLIBRARIES += $(LTLIBnfs)
+EXTRA_LTLIBRARIES += libnfs_plugin.la
 
 libaccess_realrtsp_plugin_la_SOURCES = \
 	access/rtsp/access.c \
@@ -472,12 +453,8 @@ endif
 
 ### Misc ###
 
-libgnomevfs_plugin_la_SOURCES = access/gnomevfs.c
-libgnomevfs_plugin_la_CFLAGS = $(AM_CFLAGS) $(GNOMEVFS_CFLAGS)
-libgnomevfs_plugin_la_LIBADD = $(GNOMEVFS_LIBS)
-libgnomevfs_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
-access_LTLIBRARIES += $(LTLIBgnomevfs)
-EXTRA_LTLIBRARIES += libgnomevfs_plugin.la
+libaccess_concat_plugin_la_SOURCES = access/concat.c
+access_LTLIBRARIES += libaccess_concat_plugin.la
 
 libaccess_mtp_plugin_la_SOURCES = access/mtp.c
 libaccess_mtp_plugin_la_CFLAGS = $(AM_CFLAGS) $(MTP_CFLAGS)

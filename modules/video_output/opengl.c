@@ -95,11 +95,6 @@
 #   define SUPPORTS_FIXED_PIPELINE
 #endif
 
-static const vlc_fourcc_t gl_subpicture_chromas[] = {
-    VLC_CODEC_RGBA,
-    0
-};
-
 typedef struct {
     GLuint   texture;
     unsigned format;
@@ -526,9 +521,6 @@ vout_display_opengl_t *vout_display_opengl_New(video_format_t *fmt,
 
 #ifdef __APPLE__
 #if USE_OPENGL_ES
-    /* work-around an iOS 6 bug */
-    if (kCFCoreFoundationVersionNumber >= 786.)
-        max_texture_units = 8;
     supports_shaders = true;
 #endif
 #endif
@@ -1005,7 +997,7 @@ static const GLfloat identity[] = {
     0.0f, 0.0f, 0.0f, 1.0f
 };
 
-static void orientationTransformMatrix(GLfloat matrix[static 16], video_orientation_t orientation) {
+void orientationTransformMatrix(GLfloat matrix[static 16], video_orientation_t orientation) {
 
     memcpy(matrix, identity, sizeof(identity));
 

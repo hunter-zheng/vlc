@@ -64,10 +64,6 @@ static int vlclua_pushvalue( lua_State *L, int i_type, vlc_value_t val, bool b_e
         case VLC_VAR_FLOAT:
             lua_pushnumber( L, val.f_float );
             break;
-        case VLC_VAR_TIME:
-            /* FIXME? (we're losing some precision, but does it really matter?) */
-            lua_pushnumber( L, ((double)val.i_time)/1000000. );
-            break;
         case VLC_VAR_ADDRESS:
             vlclua_error( L );
             break;
@@ -102,19 +98,13 @@ static int vlclua_tovalue( lua_State *L, int i_type, vlc_value_t *val )
             val->b_bool = luaL_checkboolean( L, -1 );
             break;
         case VLC_VAR_INTEGER:
-            val->i_int = luaL_checkint( L, -1 );
+            val->i_int = (int)luaL_checkinteger( L, -1 );
             break;
         case VLC_VAR_STRING:
             val->psz_string = (char*)luaL_checkstring( L, -1 ); /* XXX: Beware, this only stays valid as long as (L,-1) stays in the stack */
             break;
         case VLC_VAR_FLOAT:
             val->f_float = luaL_checknumber( L, -1 );
-            break;
-        case VLC_VAR_TIME:
-            {
-                double f = luaL_checknumber( L, -1 );
-                val->i_time = (int64_t)(f*1000000.);
-            }
             break;
         case VLC_VAR_ADDRESS:
             vlclua_error( L );
@@ -296,7 +286,8 @@ static int vlclua_trigger_callback( lua_State *L )
     vlc_object_t **pp_obj = luaL_checkudata( L, 1, "vlc_object" );
     const char *psz_var = luaL_checkstring( L, 2 );
 
-    return vlclua_push_ret( L, var_TriggerCallback( *pp_obj, psz_var ) );
+    var_TriggerCallback( *pp_obj, psz_var );
+    return vlclua_push_ret( L, 0 );
 }
 
 static int vlclua_inc_integer( lua_State *L )

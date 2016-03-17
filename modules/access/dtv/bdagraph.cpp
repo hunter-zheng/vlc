@@ -167,6 +167,11 @@ void dvb_remove_pid (dvb_device_t *, uint16_t)
 {
 }
 
+bool dvb_get_pid_state (const dvb_device_t *, uint16_t)
+{
+    return true;
+}
+
 unsigned dvb_enum_systems (dvb_device_t *d)
 {
     return d->module->EnumSystems( );
@@ -3370,7 +3375,7 @@ IPin* BDAGraph::FindPinOnFilter( IBaseFilter* pBaseFilter, const char* pPinName)
                 else
                     pPin = NULL;      // no
 
-                delete pString;
+                delete[] pString;
 
             }
             else

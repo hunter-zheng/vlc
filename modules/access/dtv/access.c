@@ -473,10 +473,10 @@ static int Open (vlc_object_t *obj)
         if (delsys == NULL || Tune (obj, dev, delsys, freq))
         {
             msg_Err (obj, "tuning to %"PRIu64" Hz failed", freq);
-            dialog_Fatal (obj, N_("Digital broadcasting"),
-                          N_("The selected digital tuner does not support "
-                             "the specified parameters.\n"
-                             "Please check the preferences."));
+            vlc_dialog_display_error (obj, N_("Digital broadcasting"),
+                N_("The selected digital tuner does not support "
+                   "the specified parameters.\n"
+                   "Please check the preferences."));
             goto error;
         }
     }
@@ -484,8 +484,6 @@ static int Open (vlc_object_t *obj)
 
     access->pf_block = Read;
     access->pf_control = Control;
-    free (access->psz_demux);
-    access->psz_demux = strdup ("ts");
     return VLC_SUCCESS;
 
 error:
@@ -563,8 +561,8 @@ static int Control (access_t *access, int query, va_list args)
 
         case ACCESS_SET_PRIVATE_ID_STATE:
         {
-            unsigned pid = va_arg (args, unsigned);
-            bool add = va_arg (args, unsigned);
+            unsigned pid = va_arg (args, int);
+            bool add = va_arg (args, int);
 
             if (unlikely(pid > 0x1FFF))
                 return VLC_EGENERIC;
@@ -587,7 +585,14 @@ static int Control (access_t *access, int query, va_list args)
             break;
         }
 #endif
-        /*case ACCESS_GET_PRIVATE_ID_STATE: TODO? */
+        case ACCESS_GET_PRIVATE_ID_STATE:
+        {
+            unsigned pid = va_arg (args, int);
+            bool *on = va_arg (args, bool *);
+
+            *on = likely(pid <= 0x1FFF) ? dvb_get_pid_state(dev, pid) : false;
+            return VLC_SUCCESS;
+        }
 
         default:
             return VLC_EGENERIC;

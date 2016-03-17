@@ -25,6 +25,7 @@
 # include "config.h"
 #endif
 
+#include <assert.h>
 #include <vlc_common.h>
 #include <vlc_services_discovery.h>
 
@@ -106,7 +107,7 @@ int Open_LuaSD( vlc_object_t *p_this )
     }
     vlclua_set_this( L, p_sd );
     luaL_openlibs( L );
-    luaL_register( L, "vlc", p_reg );
+    luaL_register_namespace( L, "vlc", p_reg );
     luaopen_input( L );
     luaopen_msg( L );
     luaopen_object( L );
@@ -231,9 +232,8 @@ static void* Run( void *data )
 
         vlc_mutex_lock( &p_sys->lock );
     }
-    vlc_cleanup_run();
-
-    return NULL;
+    vlc_cleanup_pop();
+    vlc_assert_unreachable();
 }
 
 /*****************************************************************************

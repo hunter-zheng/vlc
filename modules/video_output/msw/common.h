@@ -28,11 +28,7 @@
 #endif
 #ifdef MODULE_NAME_IS_direct3d11
 # include <d3d11.h>
-# if VLC_WINSTORE_APP
-#  include <dxgi1_2.h>
-# else
-#  include <dxgi.h>
-#endif
+# include <dxgi1_2.h>
 # include <d3dcompiler.h>
 #endif
 #ifdef MODULE_NAME_IS_direct3d9
@@ -50,6 +46,30 @@
  * event_thread_t: event thread
  *****************************************************************************/
 #include "events.h"
+
+#ifdef MODULE_NAME_IS_direct3d11
+typedef struct
+{
+    DXGI_FORMAT   textureFormat;
+    DXGI_FORMAT   resourceFormatYRGB;
+    DXGI_FORMAT   resourceFormatUV;
+} d3d_quad_cfg_t;
+
+typedef struct
+{
+    ID3D11Buffer              *pVertexBuffer;
+    ID3D11Texture2D           *pTexture;
+    ID3D11ShaderResourceView  *d3dresViewY;
+    ID3D11ShaderResourceView  *d3dresViewUV;
+    ID3D11PixelShader         *d3dpixelShader;
+    D3D11_VIEWPORT            cropViewport;
+} d3d_quad_t;
+#endif
+
+#if VLC_WINSTORE_APP
+extern const GUID GUID_SWAPCHAIN_WIDTH;
+extern const GUID GUID_SWAPCHAIN_HEIGHT;
+#endif
 
 /*****************************************************************************
  * vout_sys_t: video output method descriptor
@@ -150,34 +170,28 @@ struct vout_display_sys_t
     HINSTANCE                hdxgi_dll;        /* handle of the opened dxgi dll */
     HINSTANCE                hd3d11_dll;       /* handle of the opened d3d11 dll */
     HINSTANCE                hd3dcompiler_dll; /* handle of the opened d3dcompiler dll */
-    IDXGIAdapter             *dxgiadapter;     /* DXGI adapter */
-    IDXGIFactory             *dxgifactory;     /* DXGI factory */
-    IDXGISwapChain           *dxgiswapChain;   /* DXGI 1.0 swap chain */
+    IDXGIFactory2            *dxgifactory;     /* DXGI 1.2 factory */
     /* We should find a better way to store this or atleast a shorter name */
     PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN OurD3D11CreateDeviceAndSwapChain;
     PFN_D3D11_CREATE_DEVICE                OurD3D11CreateDevice;
     pD3DCompile                            OurD3DCompile;
-#else
-    IDXGISwapChain1          *dxgiswapChain;   /* DXGI 1.1 swap chain */
 #endif
+    IDXGISwapChain1          *dxgiswapChain;   /* DXGI 1.1 swap chain */
     ID3D11Device             *d3ddevice;       /* D3D device */
     ID3D11DeviceContext      *d3dcontext;      /* D3D context */
-    ID3D11Texture2D          *d3dtexture;
-    ID3D11ShaderResourceView *d3dresViewY;
-    ID3D11ShaderResourceView *d3dresViewUV;
+    d3d_quad_t               picQuad;
+    d3d_quad_cfg_t           picQuadConfig;
     ID3D11RenderTargetView   *d3drenderTargetView;
     ID3D11DepthStencilView   *d3ddepthStencilView;
-    ID3D11VertexShader       *d3dvertexShader;
-    ID3D11PixelShader        *d3dpixelShader;
-    ID3D11InputLayout        *d3dvertexLayout;
-    ID3D11SamplerState       *d3dsampState;
-    picture_sys_t            *picsys;
-    D3D_FEATURE_LEVEL        d3dfeaturelevel;
-    DXGI_FORMAT              d3dFormatTex;
-    DXGI_FORMAT              d3dFormatY;
-    DXGI_FORMAT              d3dFormatUV;
-    vlc_fourcc_t             vlcFormat;
     const char               *d3dPxShader;
+
+    // SPU
+    vlc_fourcc_t             pSubpictureChromas[2];
+    const char               *psz_rgbaPxShader;
+    ID3D11PixelShader        *pSPUPixelShader;
+    DXGI_FORMAT              d3dregion_format;
+    int                      d3dregion_count;
+    picture_t                **d3dregions;
 #endif
 
 #ifdef MODULE_NAME_IS_direct3d9

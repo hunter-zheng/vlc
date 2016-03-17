@@ -40,7 +40,7 @@ EbmlParser::EbmlParser( EbmlStream *es, EbmlElement *el_start, demux_t *p_demux,
     mb_dummy( b_with_dummy )
 {
     mi_remain_size[0] = el_start->GetSize();
-    memset( m_el, 0, 6 * sizeof( *m_el ) );
+    memset( m_el, 0, sizeof( *m_el ) * M_EL_MAXSIZE);
     m_el[0] = el_start;
 }
 
@@ -61,6 +61,21 @@ EbmlParser::~EbmlParser( void )
         }
         mb_keep = false;
     }
+}
+
+void EbmlParser::reconstruct( EbmlStream* es, EbmlElement* el_start, demux_t* p_demux )
+{
+    this->reconstruct( es, el_start, p_demux, var_InheritBool( p_demux, "mkv-use-dummy" ) );
+}
+
+void EbmlParser::reconstruct( EbmlStream* es, EbmlElement* el_start, demux_t* p_demux,
+  bool b_with_dummy)
+{
+    this->~EbmlParser();
+
+    new( static_cast<void*>( this ) ) EbmlParser(
+      es, el_start, p_demux, b_with_dummy
+    );
 }
 
 EbmlElement* EbmlParser::UnGet( uint64 i_block_pos, uint64 i_cluster_pos )
@@ -208,7 +223,7 @@ EbmlElement *EbmlParser::Get( int n_call )
             if( !mb_keep )
             {
                 if( MKV_IS_ID( p_prev, KaxBlockVirtual ) )
-                    static_cast<KaxBlockVirtualWorkaround*>(p_prev)->Fix();
+                    static_cast<KaxBlockVirtualWorkaround*>(p_prev)->Fix(); // !! WARNING : TODO !! this is undefined-behavior
                 delete p_prev;
             }
             mb_keep = false;
@@ -253,7 +268,7 @@ EbmlElement *EbmlParser::Get( int n_call )
             b_bad_position = true;
         }
 
-        if( n_call < 10 && !b_bad_position && m_el[mi_level]->IsFiniteSize() &&
+        if( n_call < M_EL_MAXSIZE && !b_bad_position && m_el[mi_level]->IsFiniteSize() &&
             ( !m_el[mi_level-1]->IsFiniteSize() ||
               m_el[mi_level]->GetEndPosition() <= m_el[mi_level-1]->GetEndPosition() ) )
         {
@@ -264,7 +279,7 @@ EbmlElement *EbmlParser::Get( int n_call )
         }
         else
         {
-            /* Too large, misplaced or 10 successive dummy elements */
+            /* Too large, misplaced or M_EL_MAXSIZE successive dummy elements */
             msg_Err( p_demux,
                      "Dummy element too large or misplaced at %" PRIu64 "... skipping to next upper element",
                      m_el[mi_level]->GetElementPosition() );

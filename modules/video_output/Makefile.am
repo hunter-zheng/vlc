@@ -5,30 +5,29 @@ EXTRA_DIST += video_output/README
 
 if HAVE_DECKLINK
 libdecklinkoutput_plugin_la_SOURCES = video_output/decklink.cpp
-libdecklinkoutput_plugin_la_CXXFLAGS = $(AM_CFLAGS) $(CPPFLAGS_decklinkoutput)
+libdecklinkoutput_plugin_la_CXXFLAGS = $(AM_CXXFLAGS) $(CPPFLAGS_decklinkoutput)
 libdecklinkoutput_plugin_la_LIBADD = $(LIBS_decklink) $(LIBDL) -lpthread
 vout_LTLIBRARIES += libdecklinkoutput_plugin.la
 endif
 
 if HAVE_OSX
 libvout_macosx_plugin_la_SOURCES = video_output/macosx.m video_output/opengl.c video_output/opengl.h
-libvout_macosx_plugin_la_CFLAGS = $(AM_CFLAGS) $(GL_CFLAGS)
-libvout_macosx_plugin_la_LIBADD = $(GL_LIBS)
+libvout_macosx_plugin_la_CFLAGS = $(AM_CFLAGS)
 libvout_macosx_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)' -Wl,-framework,OpenGL,-framework,Cocoa
 
 libcaopengllayer_plugin_la_SOURCES = video_output/caopengllayer.m video_output/opengl.c video_output/opengl.h
-libcaopengllayer_plugin_la_CFLAGS = $(AM_CFLAGS) $(GL_CFLAGS)
-libcaopengllayer_plugin_la_LIBADD = $(GL_LIBS)
+libcaopengllayer_plugin_la_CFLAGS = $(AM_CFLAGS)
 libcaopengllayer_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)' -Wl,-framework,OpenGL,-framework,Cocoa,-framework,QuartzCore
 vout_LTLIBRARIES += libvout_macosx_plugin.la libcaopengllayer_plugin.la
 endif
 
 libvout_ios2_plugin_la_SOURCES = video_output/ios2.m video_output/opengl.h video_output/opengl.c
-libvout_ios2_plugin_la_CFLAGS = $(AM_CFLAGS) $(GL_CFLAGS)
-libvout_ios2_plugin_la_OBJCFLAGS = $(AM_OBJCFLAGS) $(GL_OBJCFLAGS)
-libvout_ios2_plugin_la_LIBADD = $(AM_LIBADD) $(GL_LIBS)
+libvout_ios2_plugin_la_CFLAGS = $(AM_CFLAGS)
 libvout_ios2_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)' -Wl,-framework,OpenGLES,-framework,QuartzCore,-framework,UIKit
 if HAVE_IOS
+vout_LTLIBRARIES += libvout_ios2_plugin.la
+endif
+if HAVE_TVOS
 vout_LTLIBRARIES += libvout_ios2_plugin.la
 endif
 
@@ -182,13 +181,14 @@ vout_LTLIBRARIES += $(LTLIBdirect3d9)
 EXTRA_LTLIBRARIES += libdirect3d9_plugin.la
 
 libdirect3d11_plugin_la_SOURCES = video_output/msw/direct3d11.c \
- video_output/msw/common.c video_output/msw/common.h \
- video_output/msw/events.c video_output/msw/events.h \
- video_output/msw/builtin_shaders.h \
- video_output/msw/win32touch.c video_output/msw/win32touch.h
+ video_chroma/dxgi_fmt.c video_chroma/dxgi_fmt.h \
+ video_output/msw/common.c video_output/msw/common.h
 libdirect3d11_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) \
  -DMODULE_NAME_IS_direct3d11
 if !HAVE_WINSTORE
+libdirect3d11_plugin_la_SOURCES += video_output/msw/events.c \
+ video_output/msw/events.h \
+ video_output/msw/win32touch.c video_output/msw/win32touch.h
 libdirect3d11_plugin_la_LIBADD = -lgdi32 -lole32 -luuid
 else
 libdirect3d11_plugin_la_LIBADD = -ld3dcompiler -lole32 -luuid
@@ -266,7 +266,8 @@ libegl_android_plugin_la_SOURCES = video_output/egl.c
 libegl_android_plugin_la_CFLAGS = $(AM_CFLAGS) $(EGL_CFLAGS) -DUSE_PLATFORM_ANDROID=1
 libegl_android_plugin_la_LIBADD = $(EGL_LIBS)
 
-libandroid_native_window_plugin_la_SOURCES = video_output/android/nativewindow.c video_output/android/utils.c
+libandroid_native_window_plugin_la_SOURCES = video_output/android/nativewindow.c \
+	video_output/android/utils.c video_output/android/utils.h
 libandroid_native_window_plugin_la_CFLAGS = $(AM_CFLAGS)
 libandroid_native_window_plugin_la_LIBADD = $(LIBDL)
 
@@ -274,18 +275,10 @@ libandroid_window_plugin_la_SOURCES = video_output/android/android_window.c vide
 libandroid_window_plugin_la_CFLAGS = $(AM_CFLAGS)
 libandroid_window_plugin_la_LIBADD = $(LIBDL)
 libandroid_window_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)'
-EXTRA_LTLIBRARIES += libandroid_window_plugin.la
-
-libandroid_surface_plugin_la_SOURCES = video_output/android/surface.c video_output/android/utils.c video_output/android/utils.h
-libandroid_surface_plugin_la_CFLAGS = $(AM_CFLAGS)
-libandroid_surface_plugin_la_LIBADD = $(LIBDL)
-libandroid_surface_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)'
-EXTRA_LTLIBRARIES += libandroid_surface_plugin.la
 
 if HAVE_ANDROID
-vout_LTLIBRARIES += libandroid_native_window_plugin.la
+vout_LTLIBRARIES += libandroid_native_window_plugin.la libandroid_window_plugin.la
 vout_LTLIBRARIES += $(LTLIBandroid_window)
-vout_LTLIBRARIES += $(LTLIBandroid_surface)
 if HAVE_EGL
 vout_LTLIBRARIES += libegl_android_plugin.la
 endif
@@ -345,6 +338,16 @@ endif
 libcaca_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)'
 EXTRA_LTLIBRARIES += libcaca_plugin.la
 vout_LTLIBRARIES += $(LTLIBcaca)
+
+
+### EFL Evas video output ###
+libevas_plugin_la_SOURCES = video_output/evas.c
+libevas_plugin_la_CFLAGS = $(AM_CFLAGS) $(EVAS_CFLAGS)
+libevas_plugin_la_LIBADD = $(EVAS_LIBS)
+libevas_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)'
+if HAVE_EVAS
+vout_LTLIBRARIES += libevas_plugin.la
+endif
 
 
 ### Common ###

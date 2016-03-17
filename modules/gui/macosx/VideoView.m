@@ -37,12 +37,25 @@
 #import "CoreInteraction.h"
 #import "MainMenu.h"
 
+#import <QuartzCore/QuartzCore.h>
+
 #import <vlc_keys.h>
 
 
 /*****************************************************************************
  * VLCVoutView implementation
  *****************************************************************************/
+@interface VLCVoutView()
+{
+    NSInteger i_lastScrollWheelDirection;
+    NSTimeInterval t_lastScrollEvent;
+
+    CGFloat f_cumulated_magnification;
+
+    vout_thread_t *p_vout;
+}
+@end
+
 @implementation VLCVoutView
 
 #pragma mark -
@@ -54,7 +67,6 @@
         vlc_object_release(p_vout);
 
     [self unregisterDraggedTypes];
-    [super dealloc];
 }
 
 -(id)initWithFrame:(NSRect)frameRect
@@ -67,6 +79,33 @@
     f_cumulated_magnification = 0.0;
 
     return self;
+}
+
+- (void)addVoutLayer:(CALayer *)aLayer
+{
+    if (self.layer == nil) {
+        [self setLayer:[CALayer layer]];
+        [self setWantsLayer:YES];
+    }
+
+    [CATransaction begin];
+    aLayer.opaque = 1.;
+    aLayer.hidden = NO;
+    aLayer.bounds = self.layer.bounds;
+    [self.layer addSublayer:aLayer];
+    [self setNeedsDisplay:YES];
+    [aLayer setNeedsDisplay];
+    CGRect frame = aLayer.bounds;
+    frame.origin.x = frame.origin.y = 0.;
+    aLayer.frame = frame;
+    [CATransaction commit];
+}
+
+- (void)removeVoutLayer:(CALayer *)aLayer
+{
+    [CATransaction begin];
+    [aLayer removeFromSuperlayer];
+    [CATransaction commit];
 }
 
 - (NSDragOperation)draggingEntered:(id <NSDraggingInfo>)sender
@@ -83,8 +122,7 @@
 
 - (BOOL)performDragOperation:(id <NSDraggingInfo>)sender
 {
-    BOOL b_returned;
-    b_returned = [[VLCCoreInteraction sharedInstance] performDragOperation: sender];
+    BOOL b_returned = [[VLCCoreInteraction sharedInstance] performDragOperation:sender];
 
     [self setNeedsDisplay:YES];
     return b_returned;
@@ -123,7 +161,7 @@
         if (key) {
             /* Escape should always get you out of fullscreen */
             if (key == (unichar) 0x1b) {
-                playlist_t * p_playlist = pl_Get(VLCIntf);
+                playlist_t * p_playlist = pl_Get(getIntf());
                  if (var_GetBool(p_playlist, "fullscreen"))
                      [[VLCCoreInteraction sharedInstance] toggleFullscreen];
             }
@@ -135,7 +173,7 @@
                 var_Set(p_vout->p_libvlc, "key-pressed", val);
             }
             else
-                msg_Dbg(VLCIntf, "could not send keyevent to VLC core");
+                msg_Dbg(getIntf(), "could not send keyevent to VLC core");
 
             return;
         }
@@ -145,7 +183,7 @@
 
 - (BOOL)performKeyEquivalent:(NSEvent *)o_event
 {
-    return [[VLCMainWindow sharedInstance] performKeyEquivalent: o_event];
+    return [[[VLCMain sharedInstance] mainWindow] performKeyEquivalent: o_event];
 }
 
 - (void)mouseDown:(NSEvent *)o_event
@@ -157,7 +195,7 @@
     } else if (([o_event type] == NSRightMouseDown) ||
                (([o_event type] == NSLeftMouseDown) &&
                ([o_event modifierFlags] &  NSControlKeyMask)))
-        [NSMenu popUpContextMenu: [[VLCMainMenu sharedInstance] voutMenu] withEvent: o_event forView: self];
+        [NSMenu popUpContextMenu: [[[VLCMain sharedInstance] mainMenu] voutMenu] withEvent: o_event forView: self];
 
     [super mouseDown: o_event];
 }
@@ -165,7 +203,7 @@
 - (void)rightMouseDown:(NSEvent *)o_event
 {
     if ([o_event type] == NSRightMouseDown)
-        [NSMenu popUpContextMenu: [[VLCMainMenu sharedInstance] voutMenu] withEvent: o_event forView: self];
+        [NSMenu popUpContextMenu: [[[VLCMain sharedInstance] mainMenu] voutMenu] withEvent: o_event forView: self];
 
     [super mouseDown: o_event];
 }
@@ -173,7 +211,7 @@
 - (void)rightMouseUp:(NSEvent *)o_event
 {
     if ([o_event type] == NSRightMouseUp)
-        [NSMenu popUpContextMenu: [[VLCMainMenu sharedInstance] voutMenu] withEvent: o_event forView: self];
+        [NSMenu popUpContextMenu: [[[VLCMain sharedInstance] mainMenu] voutMenu] withEvent: o_event forView: self];
 
     [super mouseUp: o_event];
 }
@@ -196,11 +234,11 @@
 
 - (void)scrollWheel:(NSEvent *)theEvent
 {
-    intf_thread_t * p_intf = VLCIntf;
+    intf_thread_t * p_intf = getIntf();
     CGFloat f_deltaX = [theEvent deltaX];
     CGFloat f_deltaY = [theEvent deltaY];
 
-    if (!OSX_SNOW_LEOPARD && [theEvent isDirectionInvertedFromDevice]) {
+    if ([theEvent isDirectionInvertedFromDevice]) {
         f_deltaX = -f_deltaX;
         f_deltaY = -f_deltaY;
     }

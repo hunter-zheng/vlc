@@ -25,22 +25,17 @@
 #include <vlc_input_item.h>
 
 #pragma mark -
-;
-@implementation PLItem
 
-@synthesize children=_children;
-@synthesize plItemId=_playlistId;
-@synthesize input=p_input;
-@synthesize parent=_parent;
+@implementation PLItem
 
 - (id)initWithPlaylistItem:(playlist_item_t *)p_item;
 {
     self = [super init];
     if(self) {
-        _playlistId = p_item->i_id;
+        _plItemId = p_item->i_id;
 
-        p_input = p_item->p_input;
-        input_item_Hold(p_input);
+        _input = p_item->p_input;
+        input_item_Hold(_input);
         _children = [[NSMutableArray alloc] init];
     }
 
@@ -49,11 +44,7 @@
 
 - (void)dealloc
 {
-    input_item_Release(p_input);
-    [_children release];
-    [_parent release];
-
-    [super dealloc];
+    input_item_Release(_input);
 }
 
 // own hash and isEqual methods are important to retain expandable state

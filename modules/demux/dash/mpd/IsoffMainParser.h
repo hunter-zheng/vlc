@@ -25,85 +25,68 @@
 #ifndef ISOFFMAINPARSER_H_
 #define ISOFFMAINPARSER_H_
 
-#include "xml/Node.h"
-#include "mpd/IMPDParser.h"
-#include "mpd/AdaptationSet.h"
-#include "mpd/BaseUrl.h"
-#include "mpd/SegmentBase.h"
-#include "mpd/SegmentList.h"
-#include "mpd/Segment.h"
+#ifdef HAVE_CONFIG_H
+# include "config.h"
+#endif
+
+#include "../adaptive/playlist/SegmentInfoCommon.h"
+#include "Profile.hpp"
 
 #include <cstdlib>
-#include <sstream>
+
+#include <vlc_common.h>
+
+namespace adaptive
+{
+    namespace playlist
+    {
+        class SegmentInformation;
+        class MediaSegmentTemplate;
+    }
+    namespace xml
+    {
+        class Node;
+    }
+}
 
 namespace dash
 {
     namespace mpd
     {
-        class IsoffMainParser : public IMPDParser
+        class Period;
+        class AdaptationSet;
+        class MPD;
+
+        using namespace adaptive::playlist;
+        using namespace adaptive;
+
+        class IsoffMainParser
         {
             public:
-                IsoffMainParser             (dash::xml::Node *root, stream_t *p_stream);
+                IsoffMainParser             (xml::Node *root, vlc_object_t *p_object,
+                                             stream_t *p_stream, const std::string &);
                 virtual ~IsoffMainParser    ();
-
-                bool    parse  (Profile profile);
-                void    print  ();
+                MPD *   parse();
 
             private:
-                void    setMPDAttributes    ();
-                void    setAdaptationSets   (dash::xml::Node *periodNode, Period *period);
-                void    setRepresentations  (dash::xml::Node *adaptationSetNode, AdaptationSet *adaptationSet);
-                void    parseInitSegment    (dash::xml::Node *, Initializable<Segment> *);
-                void    parseTimeline       (dash::xml::Node *, MediaSegmentTemplate *);
-                void    parsePeriods        (dash::xml::Node *);
-                size_t  parseSegmentInformation(dash::xml::Node *, SegmentInformation *);
-                void    parseSegmentBase    (dash::xml::Node *, SegmentInformation *);
-                size_t  parseSegmentList    (dash::xml::Node *, SegmentInformation *);
-                size_t  parseSegmentTemplate(dash::xml::Node *, SegmentInformation *);
-                void    parseProgramInformation(dash::xml::Node *, MPD *);
-        };
+                mpd::Profile getProfile     () const;
+                void    parseMPDBaseUrl     (MPD *, xml::Node *);
+                void    parseMPDAttributes  (MPD *, xml::Node *);
+                void    parseAdaptationSets (xml::Node *periodNode, Period *period);
+                void    parseRepresentations(xml::Node *adaptationSetNode, AdaptationSet *adaptationSet);
+                void    parseInitSegment    (xml::Node *, Initializable<Segment> *, SegmentInformation *);
+                void    parseTimeline       (xml::Node *, MediaSegmentTemplate *);
+                void    parsePeriods        (MPD *, xml::Node *);
+                size_t  parseSegmentInformation(xml::Node *, SegmentInformation *, uint64_t *);
+                size_t  parseSegmentBase    (xml::Node *, SegmentInformation *);
+                size_t  parseSegmentList    (xml::Node *, SegmentInformation *);
+                size_t  parseSegmentTemplate(xml::Node *, SegmentInformation *);
+                void    parseProgramInformation(xml::Node *, MPD *);
 
-        class IsoTime
-        {
-            public:
-                IsoTime(const std::string&);
-                operator mtime_t() const;
-
-            private:
-                mtime_t time;
-        };
-
-        class UTCTime
-        {
-            public:
-                UTCTime(const std::string&);
-                operator mtime_t() const;
-
-            private:
-                mtime_t time;
-        };
-
-        template<typename T> class Integer
-        {
-            public:
-                Integer(const std::string &str)
-                {
-                    try
-                    {
-                        std::istringstream in(str);
-                        in >> value;
-                    } catch (int) {
-                        value = 0;
-                    }
-                }
-
-                operator T() const
-                {
-                    return value;
-                }
-
-            private:
-                T value;
+                xml::Node       *root;
+                vlc_object_t    *p_object;
+                stream_t        *p_stream;
+                std::string      playlisturl;
         };
     }
 }

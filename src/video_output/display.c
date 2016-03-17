@@ -35,6 +35,8 @@
 #include <vlc_vout.h>
 #include <vlc_block.h>
 #include <vlc_modules.h>
+#include <vlc_filter.h>
+#include <vlc_picture_pool.h>
 
 #include <libvlc.h>
 
@@ -410,7 +412,7 @@ struct vout_display_owner_sys_t {
     } event;
 };
 
-static void VoutDisplayCreateRender(vout_display_t *vd)
+static int VoutDisplayCreateRender(vout_display_t *vd)
 {
     vout_display_owner_sys_t *osys = vd->owner.sys;
 
@@ -433,9 +435,10 @@ static void VoutDisplayCreateRender(vout_display_t *vd)
 
     const bool convert = memcmp(&v_src, &v_dst_cmp, sizeof(v_src)) != 0;
     if (!convert)
-        return;
+        return 0;
 
-    msg_Dbg(vd, "A filter to adapt decoder to display is needed");
+    msg_Dbg(vd, "A filter to adapt decoder %4.4s to display %4.4s is needed",
+            (const char *)&v_src.i_chroma, (const char *)&v_dst.i_chroma);
 
     filter_owner_t owner = {
         .sys = vd,
@@ -445,7 +448,8 @@ static void VoutDisplayCreateRender(vout_display_t *vd)
     };
 
     osys->filters = filter_chain_NewVideo(vd, false, &owner);
-    assert(osys->filters); /* TODO critical */
+    if (unlikely(osys->filters == NULL))
+        abort(); /* TODO critical */
 
     /* */
     es_format_t src;
@@ -466,8 +470,14 @@ static void VoutDisplayCreateRender(vout_display_t *vd)
             break;
     }
     es_format_Clean(&src);
-    if (!filter)
+
+    if (filter == NULL) {
         msg_Err(vd, "Failed to adapt decoder format to display");
+        filter_chain_Delete(osys->filters);
+        osys->filters = NULL;
+        return -1;
+    }
+    return 0;
 }
 
 static void VoutDisplayDestroyRender(vout_display_t *vd)
@@ -478,11 +488,12 @@ static void VoutDisplayDestroyRender(vout_display_t *vd)
         filter_chain_Delete(osys->filters);
 }
 
-static void VoutDisplayResetRender(vout_display_t *vd)
+static int VoutDisplayResetRender(vout_display_t *vd)
 {
     VoutDisplayDestroyRender(vd);
-    VoutDisplayCreateRender(vd);
+    return VoutDisplayCreateRender(vd);
 }
+
 static void VoutDisplayEventMouse(vout_display_t *vd, int event, va_list args)
 {
     vout_display_owner_sys_t *osys = vd->owner.sys;
@@ -1263,12 +1274,13 @@ static vout_display_t *DisplayNew(vout_thread_t *vout,
     vout_display_t *p_display = vout_display_New(VLC_OBJECT(vout),
                                                  module, !is_wrapper,
                                                  source, cfg, &owner);
-    if (!p_display) {
-        free(osys);
-        return NULL;
-    }
+    if (!p_display)
+        goto error;
 
-    VoutDisplayCreateRender(p_display);
+    if (VoutDisplayCreateRender(p_display)) {
+        vout_display_Delete(p_display);
+        goto error;
+    }
 
     /* Setup delayed request */
     if (osys->sar.num != source->i_sar_num ||
@@ -1276,6 +1288,10 @@ static vout_display_t *DisplayNew(vout_thread_t *vout,
         osys->ch_sar = true;
 
     return p_display;
+error:
+    vlc_mutex_destroy(&osys->lock);
+    free(osys);
+    return NULL;
 }
 
 void vout_DeleteDisplay(vout_display_t *vd, vout_display_state_t *state)

@@ -84,8 +84,8 @@ static int RtspConnect( void *p_userdata, char *psz_server, int i_port )
     if( p_sys->fd < 0 )
     {
         msg_Err( p_access, "cannot connect to %s:%d", psz_server, i_port );
-        dialog_Fatal( p_access, _("Connection failed"),
-                        _("VLC could not connect to \"%s:%d\"."), psz_server, i_port );
+        vlc_dialog_display_error( p_access, _("Connection failed"),
+            _("VLC could not connect to \"%s:%d\"."), psz_server, i_port );
         return VLC_EGENERIC;
     }
 
@@ -106,7 +106,7 @@ static int RtspRead( void *p_userdata, uint8_t *p_buffer, int i_buffer )
     access_t *p_access = (access_t *)p_userdata;
     access_sys_t *p_sys = p_access->p_sys;
 
-    return net_Read( p_access, p_sys->fd, 0, p_buffer, i_buffer, true );
+    return net_Read( p_access, p_sys->fd, p_buffer, i_buffer );
 }
 
 static int RtspReadLine( void *p_userdata, uint8_t *p_buffer, int i_buffer )
@@ -114,7 +114,7 @@ static int RtspReadLine( void *p_userdata, uint8_t *p_buffer, int i_buffer )
     access_t *p_access = (access_t *)p_userdata;
     access_sys_t *p_sys = p_access->p_sys;
 
-    char *psz = net_Gets( p_access, p_sys->fd, 0 );
+    char *psz = net_Gets( p_access, p_sys->fd );
 
     //fprintf(stderr, "ReadLine: %s\n", psz);
 
@@ -133,7 +133,7 @@ static int RtspWrite( void *p_userdata, uint8_t *p_buffer, int i_buffer )
 
     //fprintf(stderr, "Write: %s", p_buffer);
 
-    net_Printf( p_access, p_sys->fd, 0, "%s", p_buffer );
+    net_Printf( p_access, p_sys->fd, "%s", p_buffer );
 
     return 0;
 }
@@ -167,7 +167,6 @@ static int Open( vlc_object_t *p_this )
     p_access->pf_block = BlockRead;
     p_access->pf_seek = Seek;
     p_access->pf_control = Control;
-    p_access->info.i_pos = 0;
     p_access->info.b_eof = false;
     p_access->p_sys = p_sys = malloc( sizeof( access_sys_t ) );
     if( !p_sys )
@@ -229,8 +228,8 @@ static int Open( vlc_object_t *p_this )
 
 
             msg_Err( p_access, "rtsp session can not be established" );
-            dialog_Fatal( p_access, _("Session failed"), "%s",
-                    _("The requested RTSP session could not be established.") );
+            vlc_dialog_display_error( p_access, _("Session failed"), "%s",
+                _("The requested RTSP session could not be established.") );
             goto error;
         }
 

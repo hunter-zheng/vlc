@@ -41,41 +41,28 @@
 #define URI_COLUMN @"uri"
 #define FILESIZE_COLUMN @"file-size"
 
-@class VLCPlaylist;
-
-@interface PLModel : NSObject<NSOutlineViewDataSource>
-{
-    PLItem *_rootItem;
-
-    playlist_t *p_playlist;
-    NSOutlineView *_outlineView;
-
-    // TODO: write these objects to the pastboard properly?
-    NSMutableArray *_draggedItems;
-
-    // TODO: for transition
-    VLCPlaylist *_playlist;
-}
-
-@property(readonly) PLItem *rootItem;
-@property(readonly, copy) NSArray *draggedItems;
-
-
-- (id)initWithOutlineView:(NSOutlineView *)outlineView playlist:(playlist_t *)pl rootItem:(playlist_item_t *)root playlistObject:(id)plObj;
-
-- (void)changeRootItem:(playlist_item_t *)p_root;
-
-- (BOOL)hasChildren;
-
 typedef enum {
     ROOT_TYPE_PLAYLIST,
     ROOT_TYPE_MEDIALIBRARY,
     ROOT_TYPE_OTHER
 } PLRootType;
 
+@interface PLModel : NSObject<NSOutlineViewDataSource>
+
+@property(readonly) PLItem *rootItem;
+@property(readonly, copy) NSArray *draggedItems;
+
+- (id)initWithOutlineView:(NSOutlineView *)outlineView playlist:(playlist_t *)pl rootItem:(playlist_item_t *)root;
+
+- (void)changeRootItem:(playlist_item_t *)p_root;
+
+- (BOOL)hasChildren;
+
 - (PLRootType)currentRootType;
 
 - (BOOL)editAllowed;
+- (void)deleteSelectedItem;
+
 // updates from core
 - (void)addItem:(int)i_item withParentNode:(int)i_node;
 - (void)removeItem:(int)i_item;
@@ -84,11 +71,11 @@ typedef enum {
 
 - (PLItem *)currentlyPlayingItem;
 
+- (void)playbackModeUpdated;
+
 // sorting / searching
 - (void)sortForColumn:(NSString *)o_column withMode:(int)i_mode;
 
 - (void)searchUpdate:(NSString *)o_search;
 
-
 @end
-

@@ -53,6 +53,7 @@
 #include <vlc_block_helper.h>
 #include "../codec/cc.h"
 #include "packetizer_helper.h"
+#include "startcode_helper.h"
 
 #define SYNC_INTRAFRAME_TEXT N_("Sync on Intra Frame")
 #define SYNC_INTRAFRAME_LONGTEXT N_("Normally the packetizer would " \
@@ -135,6 +136,7 @@ struct decoder_sys_t
 };
 
 static block_t *Packetize( decoder_t *, block_t ** );
+static void PacketizeFlush( decoder_t * );
 static block_t *GetCc( decoder_t *p_dec, bool pb_present[4] );
 
 static void PacketizeReset( void *p_private, bool b_broken );
@@ -167,7 +169,7 @@ static int Open( vlc_object_t *p_this )
 
     /* Misc init */
     packetizer_Init( &p_sys->packetizer,
-                     p_mp2v_startcode, sizeof(p_mp2v_startcode),
+                     p_mp2v_startcode, sizeof(p_mp2v_startcode), startcode_FindAnnexB,
                      NULL, 0, 4,
                      PacketizeReset, PacketizeParse, PacketizeValidate, p_dec );
 
@@ -209,6 +211,7 @@ static int Open( vlc_object_t *p_this )
     cc_Init( &p_sys->cc );
 
     p_dec->pf_packetize = Packetize;
+    p_dec->pf_flush = PacketizeFlush;
     p_dec->pf_get_cc = GetCc;
 
     return VLC_SUCCESS;
@@ -249,6 +252,13 @@ static block_t *Packetize( decoder_t *p_dec, block_t **pp_block )
     decoder_sys_t *p_sys = p_dec->p_sys;
 
     return packetizer_Packetize( &p_sys->packetizer, pp_block );
+}
+
+static void PacketizeFlush( decoder_t *p_dec )
+{
+    decoder_sys_t *p_sys = p_dec->p_sys;
+
+    packetizer_Flush( &p_sys->packetizer );
 }
 
 /*****************************************************************************

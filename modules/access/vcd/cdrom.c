@@ -900,6 +900,7 @@ static int OpenVCDImage( vlc_object_t * p_this, const char *psz_dev,
              (int)i_tracks, (int)p_sectors[i_tracks] );
     p_vcddev->i_tracks = ++i_tracks;
     p_vcddev->p_sectors = p_sectors;
+    p_sectors = NULL;
     i_ret = 0;
 
 error:
@@ -1172,7 +1173,7 @@ static int CdTextParse( vlc_meta_t ***ppp_tracks, int *pi_tracks,
         char *psz_track = &psz_text[0];
         while( i_track <= 127 && psz_track < &psz_text[12] )
         {
-            //fprintf( stderr, "t=%d psz_track=%p end=%p", i_track, psz_track, &psz_text[12] );
+            //fprintf( stderr, "t=%d psz_track=%p end=%p", i_track, (void *)psz_track, (void *)&psz_text[12] );
             if( *psz_track )
             {
                 astrcat( &pppsz_info[i_track][i_pack_type-0x80], psz_track );

@@ -84,8 +84,15 @@ static int Demux(demux_t *);
  */
 int Import_xspf(vlc_object_t *p_this)
 {
-    DEMUX_BY_EXTENSION_OR_MIMETYPE(".xspf", "application/xspf+xml",
-                                      "using XSPF playlist reader");
+    demux_t *p_demux = (demux_t *)p_this;
+
+    CHECK_FILE();
+
+    if( !demux_IsPathExtension( p_demux, ".xspf" )
+     && !demux_IsContentType( p_demux, "application/xspf+xml" ) )
+        return VLC_EGENERIC;
+
+    STANDARD_DEMUX_INIT_MSG("using XSPF playlist reader");
 
     return VLC_SUCCESS;
 }
@@ -259,8 +266,9 @@ static bool parse_playlist_node COMPLEX_INTERFACE
 
     /* simple element content */
     case XML_READER_TEXT:
+        FREE_VALUE();
         psz_value = strdup(name);
-        if (unlikely(!name))
+        if (unlikely(!psz_value))
             goto end;
         break;
 
@@ -511,6 +519,7 @@ static bool parse_track_node COMPLEX_INTERFACE
 
 end:
 
+    vlc_gc_decref(p_new_input);
     input_item_node_Delete(p_new_node);
     free(psz_value);
     return false;
@@ -526,7 +535,7 @@ static bool set_item_info SIMPLE_INTERFACE
         return false;
 
     /* re-convert xml special characters inside psz_value */
-    resolve_xml_special_chars(psz_value);
+    vlc_xml_decode(psz_value);
 
     /* handle each info element in a separate "if" clause */
     if (!strcmp(psz_name, "title"))
@@ -561,7 +570,7 @@ static bool set_option SIMPLE_INTERFACE
         return false;
 
     /* re-convert xml special characters inside psz_value */
-    resolve_xml_special_chars(psz_value);
+    vlc_xml_decode(psz_value);
 
     input_item_AddOption(p_input, psz_value, 0);
 
@@ -599,7 +608,7 @@ static bool parse_extension_node COMPLEX_INTERFACE
             free(psz_title);
             psz_title = strdup(value);
             if (likely(psz_title != NULL))
-                resolve_xml_special_chars(psz_title);
+                vlc_xml_decode(psz_title);
         }
         /* extension attribute: application */
         else if (!strcmp(name, "application"))
@@ -618,6 +627,7 @@ static bool parse_extension_node COMPLEX_INTERFACE
     {
         if (!psz_title)
         {
+            free(psz_application);
             msg_Warn(p_demux, "<vlc:node> requires \"title\" attribute");
             return false;
         }
@@ -631,12 +641,12 @@ static bool parse_extension_node COMPLEX_INTERFACE
             p_input_item = p_new_input;
             b_release_input_item = true;
         }
-        free(psz_title);
     }
     else if (!strcmp(psz_element, "extension"))
     {
         if (!psz_application)
         {
+            free(psz_title);
             msg_Warn(p_demux, "<extension> requires \"application\" attribute");
             return false;
         }
@@ -646,6 +656,7 @@ static bool parse_extension_node COMPLEX_INTERFACE
         {
             msg_Dbg(p_demux, "Skipping \"%s\" extension tag", psz_application);
             free(psz_application);
+            free(psz_title);
             /* Skip all children */
             for (unsigned lvl = 1; lvl;)
                 switch (xml_ReaderNextNode(p_xml_reader, NULL))
@@ -658,7 +669,7 @@ static bool parse_extension_node COMPLEX_INTERFACE
         }
     }
     free(psz_application);
-
+    free(psz_title);
 
     /* parse the child elements */
     while ((i_node = xml_ReaderNextNode(p_xml_reader, &name)) > 0)

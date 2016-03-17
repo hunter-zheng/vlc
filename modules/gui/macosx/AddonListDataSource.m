@@ -24,6 +24,12 @@
 #import "AddonListDataSource.h"
 #import "StringUtility.h"
 
+@interface VLCAddon ()
+{
+    addon_entry_t *p_addon_entry;
+}
+@end
+
 @implementation VLCAddon
 
 - (id)initWithAddon:(addon_entry_t *)p_entry
@@ -39,8 +45,6 @@
 -(void)dealloc
 {
     addon_entry_Release(p_addon_entry);
-
-    [super dealloc];
 }
 
 - (NSData *)uuid

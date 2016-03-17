@@ -77,6 +77,13 @@ enum libvlc_event_e {
     libvlc_MediaPlayerESAdded,
     libvlc_MediaPlayerESDeleted,
     libvlc_MediaPlayerESSelected,
+    libvlc_MediaPlayerCorked,
+    libvlc_MediaPlayerUncorked,
+    libvlc_MediaPlayerMuted,
+    libvlc_MediaPlayerUnmuted,
+    libvlc_MediaPlayerAudioVolume,
+    libvlc_MediaPlayerAudioDevice,
+    libvlc_MediaPlayerChapterChanged,
 
     libvlc_MediaListItemAdded=0x200,
     libvlc_MediaListWillAddItem,
@@ -153,6 +160,10 @@ typedef struct libvlc_event_t
         {
             float new_cache;
         } media_player_buffering;
+        struct
+        {
+            int new_chapter;
+        } media_player_chapter_changed;
         struct
         {
             float new_position;
@@ -240,6 +251,16 @@ typedef struct libvlc_event_t
             libvlc_track_type_t i_type;
             int                 i_id;
         } media_player_es_changed;
+
+        struct
+        {
+            float volume;
+        } media_player_audio_volume;
+
+        struct
+        {
+            const char *device;
+        } media_player_audio_device;
     } u; /**< Type-dependent event description */
 } libvlc_event_t;
 

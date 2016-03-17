@@ -129,6 +129,16 @@ static int OpenCommon( decoder_t *p_dec )
     return VLC_SUCCESS;
 }
 
+/*****************************************************************************
+ * Flush:
+ *****************************************************************************/
+static void Flush( decoder_t *p_dec )
+{
+    decoder_sys_t *p_sys = p_dec->p_sys;
+
+    date_Set( &p_sys->pts, VLC_TS_INVALID );
+}
+
 /****************************************************************************
  * DecodeBlock: the whole thing
  ****************************************************************************
@@ -142,6 +152,9 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
         return NULL;
 
     block_t *p_block = *pp_block;
+
+    if( p_block->i_flags & BLOCK_FLAG_DISCONTINUITY )
+        date_Set( &p_sys->pts, p_block->i_dts );
 
     if( p_block->i_pts <= VLC_TS_INVALID && p_block->i_dts <= VLC_TS_INVALID &&
         !date_Get( &p_sys->pts ) )
@@ -249,7 +262,10 @@ static int OpenDecoder( vlc_object_t *p_this )
 
     int ret = OpenCommon( p_dec );
     if( ret == VLC_SUCCESS )
+    {
         p_dec->pf_decode_video = DecodeFrame;
+        p_dec->pf_flush        = Flush;
+    }
     return ret;
 }
 

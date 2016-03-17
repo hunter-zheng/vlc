@@ -25,57 +25,31 @@
 # include "config.h"
 #endif
 
+#include <vlc_fixups.h>
+#include <cinttypes>
+
 #include "MPD.h"
-#include "Helper.h"
-#include "dash.hpp"
-#include "SegmentTimeline.h"
+#include "ProgramInformation.h"
+#include "Period.h"
+
 #include <vlc_common.h>
 #include <vlc_stream.h>
 
 using namespace dash::mpd;
 
-MPD::MPD (stream_t *stream_, Profile profile_) :
-    ICanonicalUrl(),
-    stream(stream_),
+MPD::MPD (vlc_object_t *p_object, Profile profile_) :
+    AbstractPlaylist(p_object),
     profile( profile_ )
 {
-    playbackStart.Set(0);
-    availabilityStartTime.Set( 0 );
-    availabilityEndTime.Set( 0 );
-    duration.Set( 0 );
-    minUpdatePeriod.Set( 0 );
-    maxSegmentDuration.Set( 0 );
-    minBufferTime.Set( 0 );
-    timeShiftBufferDepth.Set( 0 );
     programInfo.Set( NULL );
 }
 
-MPD::~MPD   ()
+MPD::~MPD()
 {
-    for(size_t i = 0; i < this->periods.size(); i++)
-        delete(this->periods.at(i));
-
-    for(size_t i = 0; i < this->baseUrls.size(); i++)
-        delete(this->baseUrls.at(i));
-
     delete(programInfo.Get());
 }
 
-const std::vector<Period*>&    MPD::getPeriods             ()
-{
-    return this->periods;
-}
-
-void                    MPD::addBaseUrl             (BaseUrl *url)
-{
-    this->baseUrls.push_back(url);
-}
-void                    MPD::addPeriod              (Period *period)
-{
-    this->periods.push_back(period);
-}
-
-bool                    MPD::isLive() const
+bool MPD::isLive() const
 {
     if(type.empty())
     {
@@ -86,90 +60,39 @@ bool                    MPD::isLive() const
         return (type != "static");
 }
 
-void MPD::setType(const std::string &type_)
-{
-    type = type_;
-}
-
 Profile MPD::getProfile() const
 {
     return profile;
 }
-Url MPD::getUrlSegment() const
+
+StreamFormat MPD::mimeToFormat(const std::string &mime)
 {
-    if (!baseUrls.empty())
-        return Url(baseUrls.front()->getUrl());
-    else
+    std::string::size_type pos = mime.find("/");
+    if(pos != std::string::npos)
     {
-        std::stringstream ss;
-        ss << stream->psz_access << "://" << Helper::getDirectoryPath(stream->psz_path) << "/";
-        return Url(ss.str());
+        std::string tail = mime.substr(pos + 1);
+        if(tail == "mp4")
+            return StreamFormat(StreamFormat::MP4);
+        else if (tail == "mp2t")
+            return StreamFormat(StreamFormat::MPEG2TS);
+        else if (tail == "vtt")
+            return StreamFormat(StreamFormat::WEBVTT);
+        else if (tail == "ttml+xml")
+            return StreamFormat(StreamFormat::TTML);
     }
+    return StreamFormat();
 }
 
-vlc_object_t * MPD::getVLCObject() const
+void MPD::debug()
 {
-    return VLC_OBJECT(stream);
-}
+    msg_Dbg(p_object, "MPD profile=%s mediaPresentationDuration=%" PRId64
+            " minBufferTime=%" PRId64,
+            static_cast<std::string>(getProfile()).c_str(),
+            duration.Get() / CLOCK_FREQ,
+            minBufferTime.Get());
+    msg_Dbg(p_object, "BaseUrl=%s", getUrlSegment().toString().c_str());
 
-Period* MPD::getFirstPeriod()
-{
-    std::vector<Period *> periods = getPeriods();
-
-    if( !periods.empty() )
-        return periods.front();
-    else
-        return NULL;
-}
-
-Period* MPD::getNextPeriod(Period *period)
-{
-    std::vector<Period *> periods = getPeriods();
-
-    for(size_t i = 0; i < periods.size(); i++)
-    {
-        if(periods.at(i) == period && (i + 1) < periods.size())
-            return periods.at(i + 1);
-    }
-
-    return NULL;
-}
-
-void MPD::getTimeLinesBoundaries(mtime_t *min, mtime_t *max) const
-{
-    *min = *max = 0;
-    for(size_t i = 0; i < periods.size(); i++)
-    {
-        std::vector<SegmentTimeline *> timelines;
-        periods.at(i)->collectTimelines(&timelines);
-
-        for(size_t j = 0; j < timelines.size(); j++)
-        {
-            const SegmentTimeline *timeline = timelines.at(j);
-            if(timeline->start() > *min)
-                *min = timeline->start();
-            if(!*max || timeline->end() < *max)
-                *max = timeline->end();
-        }
-    }
-}
-
-void MPD::mergeWith(MPD *updatedMPD, mtime_t prunebarrier)
-{
-    availabilityEndTime.Set(updatedMPD->availabilityEndTime.Get());
-    /* Only merge timelines for now */
-    for(size_t i = 0; i < periods.size() && i < updatedMPD->periods.size(); i++)
-    {
-        std::vector<SegmentTimeline *> timelines;
-        std::vector<SegmentTimeline *> timelinesUpdate;
-        periods.at(i)->collectTimelines(&timelines);
-        updatedMPD->periods.at(i)->collectTimelines(&timelinesUpdate);
-
-        for(size_t j = 0; j < timelines.size() && j < timelinesUpdate.size(); j++)
-        {
-            timelines.at(j)->mergeWith(*timelinesUpdate.at(j));
-            if(prunebarrier)
-                timelines.at(j)->prune(prunebarrier);
-        }
-    }
+    std::vector<BasePeriod *>::const_iterator i;
+    for(i = periods.begin(); i != periods.end(); ++i)
+        (*i)->debug(VLC_OBJECT(p_object));
 }

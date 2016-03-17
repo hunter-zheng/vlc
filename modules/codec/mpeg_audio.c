@@ -62,7 +62,6 @@ struct decoder_sys_t
      * Common properties
      */
     date_t          end_date;
-    unsigned int    i_current_layer;
 
     mtime_t i_pts;
 
@@ -92,6 +91,7 @@ static block_t *GetAoutBuffer( decoder_t * );
 #endif
 static int  Open( vlc_object_t * );
 static block_t *DecodeBlock  ( decoder_t *, block_t ** );
+static void Flush( decoder_t * );
 static uint8_t *GetOutBuffer ( decoder_t *, block_t ** );
 static block_t *GetSoutBuffer( decoder_t * );
 static void Close(  vlc_object_t * );
@@ -147,6 +147,11 @@ static int Open( vlc_object_t *p_this )
     block_BytestreamInit( &p_sys->bytestream );
     p_sys->i_pts = VLC_TS_INVALID;
     p_sys->b_discontinuity = false;
+    p_sys->i_frame_size = 0;
+
+    p_sys->i_channels_conf = p_sys->i_channels = p_sys->i_rate =
+    p_sys->i_max_frame_size = p_sys->i_frame_length = p_sys->i_layer =
+    p_sys->i_bit_rate = 0;
 
     /* Set output properties */
     p_dec->fmt_out.i_cat = AUDIO_ES;
@@ -156,6 +161,7 @@ static int Open( vlc_object_t *p_this )
     /* Set callback */
     p_dec->pf_decode_audio = DecodeBlock;
     p_dec->pf_packetize    = DecodeBlock;
+    p_dec->pf_flush        = Flush;
 
     /* Start with the minimum size for a free bitrate frame */
     p_sys->i_free_frame_size = MPGA_HEADER_SIZE;
@@ -181,6 +187,19 @@ static int OpenDecoder( vlc_object_t *p_this )
 }
 #endif
 
+/*****************************************************************************
+ * Flush:
+ *****************************************************************************/
+static void Flush( decoder_t *p_dec )
+{
+    decoder_sys_t *p_sys = p_dec->p_sys;
+
+    date_Set( &p_sys->end_date, 0 );
+    p_sys->i_state = STATE_NOSYNC;
+    block_BytestreamEmpty( &p_sys->bytestream );
+    p_sys->b_discontinuity = true;
+}
+
 /****************************************************************************
  * DecodeBlock: the whole thing
  ****************************************************************************
@@ -196,18 +215,20 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
 
     block_t *p_block = pp_block ? *pp_block : NULL;
 
-    if (p_block) {
-        if( p_block->i_flags&(BLOCK_FLAG_DISCONTINUITY|BLOCK_FLAG_CORRUPTED) )
+    if (p_block)
+    {
+        if( p_block->i_flags & (BLOCK_FLAG_DISCONTINUITY|BLOCK_FLAG_CORRUPTED) )
         {
-            if( p_block->i_flags&BLOCK_FLAG_CORRUPTED )
+            if( p_block->i_flags & BLOCK_FLAG_CORRUPTED )
             {
-                p_sys->i_state = STATE_NOSYNC;
-                block_BytestreamEmpty( &p_sys->bytestream );
+                Flush( p_dec );
+                block_Release( p_block );
+                *pp_block = NULL;
+                return NULL;
             }
-            date_Set( &p_sys->end_date, 0 );
-            block_Release( p_block );
+            else /* BLOCK_FLAG_DISCONTINUITY */
+                date_Set( &p_sys->end_date, 0 );
             p_sys->b_discontinuity = true;
-            return NULL;
         }
 
         if( !date_Get( &p_sys->end_date ) && p_block->i_pts <= VLC_TS_INVALID )
@@ -219,8 +240,10 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
         }
 
         block_BytestreamPush( &p_sys->bytestream, p_block );
-    } else
+    } else if (p_sys->i_frame_size)
         p_sys->i_state = STATE_SEND_DATA; /* return all the data we have left */
+    else
+        return NULL;
 
     while( 1 )
     {
@@ -286,7 +309,6 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
                 msg_Dbg( p_dec, "emulated startcode" );
                 block_SkipByte( &p_sys->bytestream );
                 p_sys->i_state = STATE_NOSYNC;
-                p_sys->b_discontinuity = true;
                 break;
             }
 
@@ -361,7 +383,6 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
                     msg_Dbg( p_dec, "emulated startcode on next frame" );
                     block_SkipByte( &p_sys->bytestream );
                     p_sys->i_state = STATE_NOSYNC;
-                    p_sys->b_discontinuity = true;
                     break;
                 }
 

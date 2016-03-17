@@ -21,104 +21,44 @@
  * along with this program; if not, write to the Free Software Foundation,
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
-
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
 
 #include "AdaptationSet.h"
-
-#include <vlc_common.h>
-#include <vlc_arrays.h>
-
-#include "SegmentTemplate.h"
+#include "Representation.h"
 #include "Period.h"
+#include "MPD.h"
 
 using namespace dash::mpd;
 
 AdaptationSet::AdaptationSet(Period *period) :
-    SegmentInformation( period ),
-    subsegmentAlignmentFlag( false ),
-    isBitstreamSwitching( false )
+    adaptive::playlist::BaseAdaptationSet( period ),
+    DASHCommonAttributesElements(),
+    subsegmentAlignmentFlag( false )
 {
 }
 
-AdaptationSet::~AdaptationSet   ()
+AdaptationSet::~AdaptationSet()
 {
-    vlc_delete_all( this->representations );
-    childs.clear();
 }
 
-const std::string& AdaptationSet::getMimeType() const
+StreamFormat AdaptationSet::getStreamFormat() const
 {
-    if (mimeType.empty() && !representations.empty())
-        return representations.front()->getMimeType();
+    if(!getMimeType().empty())
+        return MPD::mimeToFormat(getMimeType());
     else
-        return mimeType;
+        return BaseAdaptationSet::getStreamFormat();
 }
 
-bool                AdaptationSet::getSubsegmentAlignmentFlag() const
+bool AdaptationSet::getSubsegmentAlignmentFlag() const
 {
-    return this->subsegmentAlignmentFlag;
+    return subsegmentAlignmentFlag;
 }
 
 void AdaptationSet::setSubsegmentAlignmentFlag(bool alignment)
 {
-    this->subsegmentAlignmentFlag = alignment;
-}
-
-std::vector<Representation*>&    AdaptationSet::getRepresentations       ()
-{
-    return this->representations;
-}
-
-const Representation *AdaptationSet::getRepresentationById(const std::string &id) const
-{
-    std::vector<Representation*>::const_iterator    it = this->representations.begin();
-    std::vector<Representation*>::const_iterator    end = this->representations.end();
-
-    while ( it != end )
-    {
-        if ( (*it)->getId() == id )
-            return *it;
-        ++it;
-    }
-    return NULL;
-}
-
-void                            AdaptationSet::addRepresentation        (Representation *rep)
-{
-    this->representations.push_back(rep);
-    childs.push_back(rep);
+    subsegmentAlignmentFlag = alignment;
 }
 
 
-void AdaptationSet::setBitstreamSwitching  (bool value)
-{
-    this->isBitstreamSwitching = value;
-}
-
-bool AdaptationSet::getBitstreamSwitching  () const
-{
-    return this->isBitstreamSwitching;
-}
-
-Url AdaptationSet::getUrlSegment() const
-{
-    return getParentUrlSegment();
-}
-
-std::vector<std::string> AdaptationSet::toString(int indent) const
-{
-    std::vector<std::string> ret;
-    std::string text(indent, ' ');
-    text.append("AdaptationSet");
-    ret.push_back(text);
-    std::vector<Representation *>::const_iterator k;
-    for(k = representations.begin(); k != representations.end(); k++)
-    {
-        std::vector<std::string> debug = (*k)->toString(indent + 1);
-        ret.insert(ret.end(), debug.begin(), debug.end());
-    }
-    return ret;
-}

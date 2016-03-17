@@ -86,6 +86,8 @@ libvlc_audio_output_t *
         item->psz_description = strdup( module_get_name( module, true ) );
         if( unlikely(item->psz_name == NULL || item->psz_description == NULL) )
         {
+            free( item->psz_name );
+            free( item->psz_description );
             free( item );
             goto error;
         }
@@ -478,7 +480,7 @@ int64_t libvlc_audio_get_delay( libvlc_media_player_t *p_mi )
     int64_t val = 0;
     if( p_input_thread != NULL )
     {
-      val = var_GetTime( p_input_thread, "audio-delay" );
+      val = var_GetInteger( p_input_thread, "audio-delay" );
       vlc_object_release( p_input_thread );
     }
     return val;
@@ -493,7 +495,7 @@ int libvlc_audio_set_delay( libvlc_media_player_t *p_mi, int64_t i_delay )
     int ret = 0;
     if( p_input_thread != NULL )
     {
-      var_SetTime( p_input_thread, "audio-delay", i_delay );
+      var_SetInteger( p_input_thread, "audio-delay", i_delay );
       vlc_object_release( p_input_thread );
     }
     else

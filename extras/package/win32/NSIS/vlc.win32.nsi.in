@@ -167,9 +167,9 @@ RequestExecutionLevel admin
 ; Macro and Functions ;
 ;;;;;;;;;;;;;;;;;;;;;;;
 
-!include helpers/extensions.nsh
-!include helpers/install.nsh
-!include helpers/utils.nsh
+!include helpers\extensions.nsh
+!include helpers\install.nsh
+!include helpers\utils.nsh
 
 ;;;;;;;;;;;;;;;;;;;;;;
 ; Installer sections ;
@@ -201,12 +201,11 @@ ${MementoSection} $Name_Section01 SEC01
   ; Subfolders
   !insertmacro InstallFolder plugins
   !insertmacro InstallFolder locale
-  !insertmacro InstallFolder sdk
 @BUILD_SKINS_TRUE@   !insertmacro InstallFolder skins
 @BUILD_LUA_TRUE@     !insertmacro InstallFolder lua
 
   ; Generate the cache and add it to uninstall.log
-  nsExec::ExecToStack "$INSTDIR\vlc-cache-gen.exe $INSTDIR\plugins"
+  nsExec::ExecToStack '"$INSTDIR\vlc-cache-gen.exe" $INSTDIR\plugins'
   FindFirst $0 $1 "$INSTDIR\plugins\*.dat"
   FileWrite $UninstallLog "plugins\$1$\r$\n"
   FindClose $0

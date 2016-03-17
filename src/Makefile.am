@@ -32,6 +32,7 @@ pluginsinclude_HEADERS = \
 	../include/vlc_bits.h \
 	../include/vlc_block.h \
 	../include/vlc_block_helper.h \
+	../include/vlc_boxes.h \
 	../include/vlc_charset.h \
 	../include/vlc_codec.h \
 	../include/vlc_common.h \
@@ -58,6 +59,7 @@ pluginsinclude_HEADERS = \
 	../include/vlc_input_item.h \
 	../include/vlc_interface.h \
 	../include/vlc_keys.h \
+	../include/vlc_keystore.h \
 	../include/vlc_main.h \
 	../include/vlc_md5.h \
 	../include/vlc_messages.h \
@@ -79,6 +81,7 @@ pluginsinclude_HEADERS = \
 	../include/vlc_rand.h \
 	../include/vlc_services_discovery.h \
 	../include/vlc_fingerprinter.h \
+	../include/vlc_interrupt.h \
 	../include/vlc_sout.h \
 	../include/vlc_spu.h \
 	../include/vlc_stream.h \
@@ -112,7 +115,6 @@ noinst_HEADERS = \
 	../include/vlc_update.h \
 	../include/vlc_vod.h \
 	../include/vlc_vout_wrapper.h \
-	../include/vlc_windows_interfaces.h \
 	$(NULL)
 
 ../include/vlc_about.h: Makefile.am $(top_srcdir)/COPYING $(top_srcdir)/THANKS $(top_srcdir)/AUTHORS
@@ -186,7 +188,7 @@ libvlccore_la_LDFLAGS = \
 libvlccore_la_LIBADD = $(LIBS_libvlccore) \
 	../compat/libcompat.la \
 	$(LTLIBINTL) $(LTLIBICONV) \
-	$(IDN_LIBS) $(LIBPTHREAD) $(SOCKET_LIBS) $(LIBDL) $(LIBM)
+	$(IDN_LIBS) $(LIBPTHREAD) $(SOCKET_LIBS) $(LIBRT) $(LIBDL) $(LIBM)
 libvlccore_la_DEPENDENCIES = libvlccore.sym
 if HAVE_WIN32
 libvlccore_la_DEPENDENCIES += libvlc_win32_rc.$(OBJEXT)
@@ -226,14 +228,10 @@ else
 if HAVE_WIN32
 libvlccore_la_SOURCES += $(SOURCES_libvlc_win32)
 else
-if HAVE_SYMBIAN
-#libvlccore_la_SOURCES += $(SOURCES_libvlc_symbian)
-else
 if HAVE_OS2
 libvlccore_la_SOURCES += $(SOURCES_libvlc_os2)
 else
 libvlccore_la_SOURCES += $(SOURCES_libvlc_other)
-endif
 endif
 endif
 endif
@@ -271,7 +269,7 @@ SOURCES_libvlc_android = \
 	posix/timer.c \
 	posix/linux_cpu.c \
 	posix/linux_specific.c \
-	posix/specific.c \
+	android/specific.c \
 	posix/rand.c \
 	$(NULL)
 
@@ -299,13 +297,6 @@ SOURCES_libvlc_win32 = \
 	win32/specific.c \
 	win32/winsock.c \
 	win32/rand.c \
-	$(NULL)
-
-SOURCES_libvlc_symbian = \
-	symbian/path.cpp \
-	symbian/dirs.c \
-	win32/plugin.c \
-	posix/rand.c \
 	$(NULL)
 
 SOURCES_libvlc_os2 = \
@@ -371,7 +362,6 @@ SOURCES_libvlc_common = \
 	input/input.c \
 	input/info.h \
 	input/meta.c \
-	input/access.h \
 	input/clock.h \
 	input/decoder.h \
 	input/demux.h \
@@ -425,6 +415,7 @@ SOURCES_libvlc_common = \
 	audio_output/output.c \
 	audio_output/volume.c \
 	network/getaddrinfo.c \
+	network/http_auth.c \
 	network/io.c \
 	network/tcp.c \
 	network/udp.c \
@@ -444,10 +435,15 @@ SOURCES_libvlc_common = \
 	misc/block.c \
 	misc/fifo.c \
 	misc/fourcc.c \
+	misc/fourcc_list.h \
 	misc/es_format.c \
 	misc/picture.c \
+	misc/picture.h \
 	misc/picture_fifo.c \
 	misc/picture_pool.c \
+	misc/interrupt.h \
+	misc/interrupt.c \
+	misc/keystore.c \
 	modules/modules.h \
 	modules/modules.c \
 	modules/bank.c \
@@ -485,7 +481,6 @@ SOURCES_libvlc_common = \
 	misc/addons.c \
 	misc/filter.c \
 	misc/filter_chain.c \
-	misc/http_auth.c \
 	misc/httpcookies.c \
 	misc/fingerprinter.c \
 	misc/text_style.c \
@@ -514,12 +509,27 @@ SOURCES_libvlc = \
 	$(SOURCES_libvlc_common) \
 	$(NULL)
 
+# FourCC tables
+BUILT_SOURCES += fourcc_tables.h
+EXTRA_DIST += misc/fourcc_gen.c
+MOSTLYCLEANFILES = fourcc_gen$(BUILDEXEEXT)
+
+fourcc_gen$(BUILDEXEEXT): misc/fourcc_gen.c misc/fourcc_list.h ../include/vlc_fourcc.h
+	$(AM_V_at)rm -f -- $@
+	$(AM_V_CC)$(BUILDCC) -I$(srcdir) -o $@ $<
+
+fourcc_tables.h: fourcc_gen$(BUILDEXEEXT)
+	$(AM_V_at)rm -f -- $@.tmp
+	$(AM_V_GEN)$(builddir)/fourcc_gen > $@.tmp
+	$(AM_V_at)mv -f -- $@.tmp $@
+
 # Unit/regression tests
 #
 check_PROGRAMS = \
 	test_block \
 	test_dictionary \
 	test_i18n_atof \
+	test_interrupt \
 	test_md5 \
 	test_picture_pool \
 	test_timer \
@@ -528,7 +538,7 @@ check_PROGRAMS = \
 	test_xmlent \
 	test_headers
 
-TESTS = $(check_PROGRAMS)
+TESTS = $(check_PROGRAMS) check_symbols
 
 test_block_SOURCES = test/block_test.c
 test_block_LDADD = $(LDADD) $(LIBS_libvlccore)
@@ -536,6 +546,8 @@ test_block_DEPENDENCIES =
 
 test_dictionary_SOURCES = test/dictionary.c
 test_i18n_atof_SOURCES = test/i18n_atof.c
+test_interrupt_SOURCES = test/interrupt.c
+test_interrupt_LDADD = $(LDADD) $(LIBS_libvlccore) $(LIBPTHREAD)
 test_md5_SOURCES = test/md5.c
 test_picture_pool_SOURCES = test/picture_pool.c
 test_timer_SOURCES = test/timer.c
@@ -582,7 +594,7 @@ stamp-revision:
 # Unit/regression test
 ###############################################################################
 
-dist_check_SCRIPTS = check_headers
+dist_check_SCRIPTS = check_headers check_symbols
 
 check-local:
 	for h in `echo $(pkginclude_HEADERS) | sed -e s,\.\./include/,,g`; \

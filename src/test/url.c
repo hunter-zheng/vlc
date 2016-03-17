@@ -60,7 +60,7 @@ static void test (conv_t f, const char *in, const char *out)
 
 static inline void test_decode (const char *in, const char *out)
 {
-    test (decode_URI_duplicate, in, out);
+    test (vlc_uri_decode_duplicate, in, out);
 }
 
 static inline void test_b64 (const char *in, const char *out)
@@ -80,20 +80,26 @@ static inline void test_path (const char *in, const char *out)
 
 static inline void test_current_directory_path (const char *in, const char *cwd, const char *out)
 {
-    char * expected_result = NULL;
-    int val = asprintf(&expected_result, "file://%s/%s", cwd, out);
+    char *expected_result;
+    int val = asprintf (&expected_result, "file://%s/%s", cwd, out);
     assert (val != -1);
 
     test (make_URI_def, in, expected_result);
+    free(expected_result);
 }
 
 static void test_url_parse(const char* in, const char* protocol, const char* user,
                            const char* pass, const char* host, unsigned i_port,
                            const char* path, const char* option )
 {
-#define CHECK( a, b ) assert(((a == NULL) && (b == NULL)) || !strcmp((a), (b)))
+#define CHECK( a, b ) \
+    if (a == NULL) \
+        assert(b == NULL); \
+    else \
+        assert(b != NULL && !strcmp((a), (b)))
+
     vlc_url_t url;
-    vlc_UrlParse( &url, in, '?' );
+    vlc_UrlParse( &url, in );
     CHECK( url.psz_protocol, protocol );
     CHECK( url.psz_username, user );
     CHECK( url.psz_password, pass );
@@ -163,13 +169,17 @@ int main (void)
     assert (val != -1);*/
 
     /* URI to path tests */
-#define test( a, b ) test (make_path, a, b)
+#define test( a, b ) test (vlc_uri2path, a, b)
     test ("mailto:john@example.com", NULL);
     test ("http://www.example.com/file.html#ref", NULL);
     test ("file://", NULL);
     test ("file:///", "/");
     test ("file://localhost/home/john/music%2Eogg", "/home/john/music.ogg");
     test ("file://localhost/home/john/text#ref", "/home/john/text");
+    test ("file://localhost/home/john/text?name=value", "/home/john/text");
+    test ("file://localhost/home/john/text?name=value#ref", "/home/john/text");
+    test ("file://?name=value", NULL);
+    test ("file:///?name=value", "/");
     test ("fd://0foobar", NULL);
     test ("fd://0#ref", "/dev/stdin");
     test ("fd://1", "/dev/stdout");
@@ -181,6 +191,16 @@ int main (void)
     test_url_parse("protocol://john:doe@1.2.3.4:567", "protocol", "john", "doe", "1.2.3.4", 567, NULL, NULL);
     test_url_parse("http://a.b/?opt=val", "http", NULL, NULL, "a.b", 0, "/", "opt=val");
     test_url_parse("p://u:p@host:123/a/b/c?o=v", "p", "u", "p", "host", 123, "/a/b/c", "o=v");
-
+    test_url_parse("p://?o=v", "p", NULL, NULL, "", 0, NULL, "o=v");
+    test_url_parse("p://h?o=v", "p", NULL, NULL, "h", 0, NULL, "o=v");
+    test_url_parse("p://h:123?o=v", "p", NULL, NULL, "h", 123, NULL, "o=v");
+    test_url_parse("p://u:p@h:123?o=v", "p", "u", "p", "h", 123, NULL, "o=v");
+    test_url_parse("p://white%20spaced", "p", NULL, NULL, "white%20spaced", 0,
+                   NULL, NULL);
+    test_url_parse("p://h/white%20spaced", "p", NULL, NULL, "h", 0,
+                   "/white%20spaced", NULL);
+    /* Invalid URIs */
+    test_url_parse("p://G a r b a g e", "p", NULL, NULL, NULL, 0, NULL, NULL);
+    test_url_parse("p://h/G a r b a g e", "p", NULL, NULL, "h", 0, NULL, NULL);
     return 0;
 }

@@ -4,7 +4,8 @@ aout_LTLIBRARIES =
 libopensles_android_plugin_la_SOURCES = audio_output/opensles_android.c
 libopensles_android_plugin_la_LIBADD = $(LIBDL) $(LIBM)
 
-libandroid_audiotrack_plugin_la_SOURCES = audio_output/audiotrack.c
+libandroid_audiotrack_plugin_la_SOURCES = audio_output/audiotrack.c \
+	video_output/android/utils.c video_output/android/utils.h
 libandroid_audiotrack_plugin_la_CFLAGS = $(AM_CFLAGS)
 
 if HAVE_ANDROID
@@ -103,10 +104,13 @@ libauhal_plugin_la_LDFLAGS = $(AM_LDFLAGS) -Wl,-framework,CoreAudio,-framework,A
 if HAVE_OSX
 aout_LTLIBRARIES += libauhal_plugin.la
 endif
-libaudiounit_ios_plugin_la_SOURCES = audio_output/audiounit_ios.c \
-	audio_output/TPCircularBuffer.h audio_output/TPCircularBuffer.c
-libaudiounit_ios_plugin_la_LDFLAGS = $(libauhal_plugin_la_LDFLAGS)
+libaudiounit_ios_plugin_la_SOURCES = audio_output/audiounit_ios.m \
+        audio_output/TPCircularBuffer.h audio_output/TPCircularBuffer.c
+libaudiounit_ios_plugin_la_LDFLAGS = $(AM_LDFLAGS) -Wl,-framework,CoreAudio,-framework,AudioUnit,-framework,AudioToolbox,-framework,CoreServices,-framework,UIKit,-framework,AVFoundation -rpath '$(aoutdir)'
 if HAVE_IOS
+aout_LTLIBRARIES += libaudiounit_ios_plugin.la
+endif
+if HAVE_TVOS
 aout_LTLIBRARIES += libaudiounit_ios_plugin.la
 endif
 
@@ -114,3 +118,8 @@ libaudioqueue_plugin_la_SOURCES = audio_output/audioqueue.c
 libaudioqueue_plugin_la_LDFLAGS = $(AM_LDFLAGS) -Wl,-framework,CoreAudio,-framework,AudioUnit,-framework,AudioToolbox,-framework,CoreServices -rpath '$(aoutdir)'
 EXTRA_LTLIBRARIES += libaudioqueue_plugin.la
 aout_LTLIBRARIES += $(LTLIBaudioqueue)
+
+libtizen_audio_plugin_la_SOURCES = audio_output/tizen_audio.c
+libtizen_audio_plugin_la_CFLAGS = $(AM_CFLAGS)
+EXTRA_LTLIBRARIES += libtizen_audio_plugin.la
+aout_LTLIBRARIES += $(LTLIBtizen_audio)

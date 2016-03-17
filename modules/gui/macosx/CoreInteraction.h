@@ -1,7 +1,7 @@
 /*****************************************************************************
  * CoreInteraction.h: MacOS X interface module
  *****************************************************************************
- * Copyright (C) 2011-2014 Felix Paul Kühne
+ * Copyright (C) 2011-2015 Felix Paul Kühne
  * $Id$
  *
  * Authors: Felix Paul Kühne <fkuehne -at- videolan -dot- org>
@@ -22,15 +22,9 @@
  *****************************************************************************/
 
 #import <Cocoa/Cocoa.h>
-#import <vlc_common.h>
-#import <vlc_interface.h>
 
-@interface VLCCoreInteraction : NSObject {
-    int i_currentPlaybackRate;
-    mtime_t timeA, timeB;
+@interface VLCCoreInteraction : NSObject
 
-    float f_maxVolume;
-}
 + (VLCCoreInteraction *)sharedInstance;
 @property (readwrite) int volume;
 @property (readonly, nonatomic) float maxVolume;
@@ -72,8 +66,12 @@
 - (void)volumeUp;
 - (void)volumeDown;
 - (void)toggleMute;
+- (void)showPosition;
+- (void)startListeningWithAppleRemote;
+- (void)stopListeningWithAppleRemote;
 
 - (void)addSubtitlesToCurrentInput:(NSArray *)paths;
+
 - (BOOL)performDragOperation:(id <NSDraggingInfo>)sender;
 
 - (void)toggleFullscreen;
@@ -85,4 +83,9 @@
 - (void)setVideoFilterProperty: (const char *)psz_name forFilter: (const char *)psz_filter float: (float)f_value;
 - (void)setVideoFilterProperty: (const char *)psz_name forFilter: (const char *)psz_filter string: (const char *)psz_value;
 - (void)setVideoFilterProperty: (const char *)psz_name forFilter: (const char *)psz_filter boolean: (BOOL)b_value;
+
+- (BOOL)keyEvent:(NSEvent *)o_event;
+- (void)updateCurrentlyUsedHotkeys;
+- (BOOL)hasDefinedShortcutKey:(NSEvent *)o_event force:(BOOL)b_force;
+
 @end

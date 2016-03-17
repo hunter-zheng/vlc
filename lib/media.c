@@ -71,7 +71,8 @@ static const vlc_meta_type_t libvlc_to_vlc_meta[] =
     [libvlc_meta_ShowName]     = vlc_meta_ShowName,
     [libvlc_meta_Actors]       = vlc_meta_Actors,
     [libvlc_meta_AlbumArtist]  = vlc_meta_AlbumArtist,
-    [libvlc_meta_DiscNumber]   = vlc_meta_DiscNumber
+    [libvlc_meta_DiscNumber]   = vlc_meta_DiscNumber,
+    [libvlc_meta_DiscTotal]    = vlc_meta_DiscTotal
 };
 
 static const libvlc_meta_t vlc_to_libvlc_meta[] =
@@ -101,7 +102,8 @@ static const libvlc_meta_t vlc_to_libvlc_meta[] =
     [vlc_meta_ShowName]     = libvlc_meta_ShowName,
     [vlc_meta_Actors]       = libvlc_meta_Actors,
     [vlc_meta_AlbumArtist]  = libvlc_meta_AlbumArtist,
-    [vlc_meta_DiscNumber]   = libvlc_meta_DiscNumber
+    [vlc_meta_DiscNumber]   = libvlc_meta_DiscNumber,
+    [vlc_meta_DiscTotal]    = libvlc_meta_DiscTotal
 };
 
 static libvlc_media_list_t *media_get_subitems( libvlc_media_t * p_md,
@@ -355,26 +357,18 @@ libvlc_media_t * libvlc_media_new_from_input_item(
      * It can give a bunch of item to read. */
     p_md->p_subitems        = NULL;
 
-    p_md->p_event_manager = libvlc_event_manager_new( p_md, p_instance );
+    p_md->p_event_manager = libvlc_event_manager_new( p_md );
     if( unlikely(p_md->p_event_manager == NULL) )
     {
         free(p_md);
         return NULL;
     }
 
-    libvlc_event_manager_t *em = p_md->p_event_manager;
-    libvlc_event_manager_register_event_type(em, libvlc_MediaMetaChanged);
-    libvlc_event_manager_register_event_type(em, libvlc_MediaSubItemAdded);
-    libvlc_event_manager_register_event_type(em, libvlc_MediaFreed);
-    libvlc_event_manager_register_event_type(em, libvlc_MediaDurationChanged);
-    libvlc_event_manager_register_event_type(em, libvlc_MediaStateChanged);
-    libvlc_event_manager_register_event_type(em, libvlc_MediaParsedChanged);
-    libvlc_event_manager_register_event_type(em, libvlc_MediaSubItemTreeAdded);
-
     vlc_gc_incref( p_md->p_input_item );
 
     install_input_item_observer( p_md );
 
+    libvlc_retain( p_instance );
     return p_md;
 }
 
@@ -513,10 +507,11 @@ void libvlc_media_release( libvlc_media_t *p_md )
     if( p_md->i_refcount > 0 )
         return;
 
+    uninstall_input_item_observer( p_md );
+
     if( p_md->p_subitems )
         libvlc_media_list_release( p_md->p_subitems );
 
-    uninstall_input_item_observer( p_md );
     vlc_gc_decref( p_md->p_input_item );
 
     vlc_cond_destroy( &p_md->parsed_cond );
@@ -532,7 +527,7 @@ void libvlc_media_release( libvlc_media_t *p_md )
     libvlc_event_send( p_md->p_event_manager, &event );
 
     libvlc_event_manager_release( p_md->p_event_manager );
-
+    libvlc_release( p_md->p_libvlc_instance );
     free( p_md );
 }
 
@@ -746,6 +741,8 @@ static int media_parse(libvlc_media_t *media, bool b_async,
 
         if (parse_flag & libvlc_media_parse_network)
             parse_scope |= META_REQUEST_OPTION_SCOPE_NETWORK;
+        if (parse_flag & libvlc_media_do_interact)
+            parse_scope |= META_REQUEST_OPTION_DO_INTERACT;
         ret = libvlc_MetaRequest(libvlc, item, parse_scope);
         if (ret != VLC_SUCCESS)
             return ret;
@@ -869,8 +866,8 @@ libvlc_media_get_tracks_info( libvlc_media_t *p_md, libvlc_media_track_info_t **
             break;
         case VIDEO_ES:
             p_mes->i_type = libvlc_track_video;
-            p_mes->u.video.i_height = p_es->video.i_height;
-            p_mes->u.video.i_width = p_es->video.i_width;
+            p_mes->u.video.i_height = p_es->video.i_visible_height;
+            p_mes->u.video.i_width = p_es->video.i_visible_width;
             break;
         case AUDIO_ES:
             p_mes->i_type = libvlc_track_audio;
@@ -945,8 +942,8 @@ libvlc_media_tracks_get( libvlc_media_t *p_md, libvlc_media_track_t *** pp_es )
             break;
         case VIDEO_ES:
             p_mes->i_type = libvlc_track_video;
-            p_mes->video->i_height = p_es->video.i_height;
-            p_mes->video->i_width = p_es->video.i_width;
+            p_mes->video->i_height = p_es->video.i_visible_height;
+            p_mes->video->i_width = p_es->video.i_visible_width;
             p_mes->video->i_sar_num = p_es->video.i_sar_num;
             p_mes->video->i_sar_den = p_es->video.i_sar_den;
             p_mes->video->i_frame_rate_num = p_es->video.i_frame_rate;

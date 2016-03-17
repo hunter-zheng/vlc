@@ -26,14 +26,12 @@
  * TODO: test non stereo audio
  */
 
-#define __STDC_FORMAT_MACROS
-#define __STDC_CONSTANT_MACROS
-
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
 
-#include <stdint.h>
+#include <vlc_fixups.h>
+#include <cinttypes>
 
 #include <vlc_common.h>
 #include <vlc_plugin.h>
@@ -44,7 +42,6 @@
 
 #include <vlc_block.h>
 #include <vlc_image.h>
-#include <vlc_atomic.h>
 #include <vlc_aout.h>
 #include <arpa/inet.h>
 
@@ -176,17 +173,17 @@ static void CloseAudio          (vlc_object_t *);
 vlc_module_begin()
     set_shortname(N_("DecklinkOutput"))
     set_description(N_("output module to write to Blackmagic SDI card"))
-    set_section(N_("Decklink General Options"), NULL)
+    set_section(N_("DeckLink General Options"), NULL)
     add_integer(CFG_PREFIX "card-index", 0,
                 CARD_INDEX_TEXT, CARD_INDEX_LONGTEXT, true)
 
     add_submodule ()
-    set_description (N_("Decklink Video Output module"))
+    set_description (N_("DeckLink Video Output module"))
     set_category(CAT_VIDEO)
     set_subcategory(SUBCAT_VIDEO_VOUT)
     set_capability("vout display", 0)
     set_callbacks (OpenVideo, CloseVideo)
-    set_section(N_("Decklink Video Options"), NULL)
+    set_section(N_("DeckLink Video Options"), NULL)
     add_string(VIDEO_CFG_PREFIX "video-connection", "sdi",
                 VIDEO_CONNECTION_TEXT, VIDEO_CONNECTION_LONGTEXT, true)
                 change_string_list(ppsz_videoconns, ppsz_videoconns_text)
@@ -201,12 +198,12 @@ vlc_module_begin()
 
 
     add_submodule ()
-    set_description (N_("Decklink Audio Output module"))
+    set_description (N_("DeckLink Audio Output module"))
     set_category(CAT_AUDIO)
     set_subcategory(SUBCAT_AUDIO_AOUT)
     set_capability("audio output", 0)
     set_callbacks (OpenAudio, CloseAudio)
-    set_section(N_("Decklink Audio Options"), NULL)
+    set_section(N_("DeckLink Audio Options"), NULL)
     add_obsolete_string("audio-connection")
     add_integer(AUDIO_CFG_PREFIX "audio-rate", 48000,
                 RATE_TEXT, RATE_LONGTEXT, true)
@@ -656,7 +653,7 @@ static void DisplayVideo(vout_display_t *vd, picture_t *picture, subpicture_t *)
         picture->date, length, CLOCK_FREQ);
 
     if (result != S_OK) {
-        msg_Err(vd, "Dropped Video frame %"PRId64 ": 0x%x",
+        msg_Err(vd, "Dropped Video frame %" PRId64 ": 0x%x",
             picture->date, result);
         goto end;
     }
@@ -670,7 +667,7 @@ static void DisplayVideo(vout_display_t *vd, picture_t *picture, subpicture_t *)
     if ((now - decklink_now) > 400000) {
         /* XXX: workaround card clock drift */
         decklink_sys->offset += 50000;
-        msg_Err(vd, "Delaying: offset now %"PRId64"", decklink_sys->offset);
+        msg_Err(vd, "Delaying: offset now %" PRId64, decklink_sys->offset);
     }
 
 end:

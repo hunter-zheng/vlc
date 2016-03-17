@@ -178,7 +178,9 @@ static int  OpenPacketizer(vlc_object_t *);
 static void ClosePacketizer(vlc_object_t *);
 
 static block_t *PacketizeRawBlock    (decoder_t *, block_t **);
+static void     FlushRawBlock( decoder_t * );
 static block_t *PacketizeStreamBlock(decoder_t *, block_t **);
+static void     FlushStreamBlock( decoder_t * );
 
 /*****************************************************************************
  * Module descriptor
@@ -256,6 +258,7 @@ static int OpenPacketizer(vlc_object_t *p_this)
 
         /* Set callback */
         p_dec->pf_packetize = PacketizeRawBlock;
+        p_dec->pf_flush = FlushRawBlock;
         p_sys->i_type = TYPE_RAW;
     } else {
         msg_Dbg(p_dec, "no decoder specific info, must be an ADTS or LOAS stream");
@@ -268,6 +271,7 @@ static int OpenPacketizer(vlc_object_t *p_this)
 
         /* Set callback */
         p_dec->pf_packetize = PacketizeStreamBlock;
+        p_dec->pf_flush = FlushStreamBlock;
         p_sys->i_type = TYPE_NONE;
     }
 
@@ -286,6 +290,16 @@ static void ClosePacketizer(vlc_object_t *p_this)
     free(p_sys);
 }
 
+/*****************************************************************************
+ * FlushRawBlock:
+ *****************************************************************************/
+static void FlushRawBlock(decoder_t *p_dec)
+{
+    decoder_sys_t *p_sys = p_dec->p_sys;
+
+    date_Set(&p_sys->end_date, 0);
+}
+
 /****************************************************************************
  * PacketizeRawBlock: the whole thing
  ****************************************************************************
@@ -299,10 +313,12 @@ static block_t *PacketizeRawBlock(decoder_t *p_dec, block_t **pp_block)
     if (!pp_block || !*pp_block)
         return NULL;
 
-    if ((*pp_block)->i_flags&(BLOCK_FLAG_DISCONTINUITY|BLOCK_FLAG_CORRUPTED)) {
-        date_Set(&p_sys->end_date, 0);
-        block_Release(*pp_block);
-        return NULL;
+    if ((*pp_block)->i_flags & (BLOCK_FLAG_DISCONTINUITY | BLOCK_FLAG_CORRUPTED)) {
+        FlushRawBlock(p_dec);
+        if ((*pp_block)->i_flags&(BLOCK_FLAG_CORRUPTED)) {
+            block_Release(*pp_block);
+            return NULL;
+        }
     }
 
     p_block = *pp_block;
@@ -929,6 +945,18 @@ static void SetupOutput(decoder_t *p_dec, block_t *p_block)
         date_Increment(&p_sys->end_date, p_sys->i_frame_length) - p_block->i_pts;
 }
 
+/*****************************************************************************
+ * FlushStreamBlock:
+ *****************************************************************************/
+static void FlushStreamBlock(decoder_t *p_dec)
+{
+    decoder_sys_t *p_sys = p_dec->p_sys;
+
+    p_sys->i_state = STATE_NOSYNC;
+    block_BytestreamEmpty(&p_sys->bytestream);
+    date_Set(&p_sys->end_date, VLC_TS_INVALID);
+}
+
 /****************************************************************************
  * PacketizeStreamBlock: ADTS/LOAS packetizer
  ****************************************************************************/
@@ -942,14 +970,12 @@ static block_t *PacketizeStreamBlock(decoder_t *p_dec, block_t **pp_block)
     if (!pp_block || !*pp_block)
         return NULL;
 
-    if ((*pp_block)->i_flags&(BLOCK_FLAG_DISCONTINUITY|BLOCK_FLAG_CORRUPTED)) {
-        if ((*pp_block)->i_flags&BLOCK_FLAG_CORRUPTED) {
-            p_sys->i_state = STATE_NOSYNC;
-            block_BytestreamEmpty(&p_sys->bytestream);
+    if ((*pp_block)->i_flags & (BLOCK_FLAG_DISCONTINUITY|BLOCK_FLAG_CORRUPTED)) {
+        FlushStreamBlock(p_dec);
+        if ((*pp_block)->i_flags & BLOCK_FLAG_CORRUPTED) {
+            block_Release(*pp_block);
+            return NULL;
         }
-        date_Set(&p_sys->end_date, 0);
-        block_Release(*pp_block);
-        return NULL;
     }
 
     if (!date_Get(&p_sys->end_date) && (*pp_block)->i_pts <= VLC_TS_INVALID) {

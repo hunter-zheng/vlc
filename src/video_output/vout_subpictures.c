@@ -205,7 +205,7 @@ static filter_t *SpuRenderCreateAndLoadText(spu_t *spu)
     text->p_module = module_need(text, "text renderer", "$text-renderer", false);
 
     /* Create a few variables used for enhanced text rendering */
-    var_Create(text, "spu-elapsed",   VLC_VAR_TIME);
+    var_Create(text, "spu-elapsed",   VLC_VAR_INTEGER);
     var_Create(text, "text-rerender", VLC_VAR_BOOL);
 
     return text;
@@ -272,13 +272,11 @@ static void SpuRenderText(spu_t *spu, bool *rerender_text,
      * least show up on screen, but the effect won't change
      * the text over time.
      */
-    var_SetTime(text, "spu-elapsed", elapsed_time);
+    var_SetInteger(text, "spu-elapsed", elapsed_time);
     var_SetBool(text, "text-rerender", false);
 
-    if (text->pf_render_html && region->psz_html)
-        text->pf_render_html(text, region, region, chroma_list);
-    else if (text->pf_render_text)
-        text->pf_render_text(text, region, region, chroma_list);
+    if ( region->p_text )
+        text->pf_render(text, region, region, chroma_list);
     *rerender_text = var_GetBool(text, "text-rerender");
 }
 
@@ -1433,12 +1431,14 @@ subpicture_t *spu_Render(spu_t *spu,
         VLC_CODEC_YUVA,
         VLC_CODEC_RGBA,
         VLC_CODEC_ARGB,
+        VLC_CODEC_BGRA,
         VLC_CODEC_YUVP,
         0,
     };
     static const vlc_fourcc_t chroma_list_default_rgb[] = {
         VLC_CODEC_RGBA,
         VLC_CODEC_ARGB,
+        VLC_CODEC_BGRA,
         VLC_CODEC_YUVA,
         VLC_CODEC_YUVP,
         0,

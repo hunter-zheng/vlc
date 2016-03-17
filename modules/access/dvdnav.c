@@ -80,7 +80,7 @@
 static int  AccessDemuxOpen ( vlc_object_t * );
 static void Close( vlc_object_t * );
 
-#if DVDREAD_VERSION >= 50300
+#if DVDREAD_VERSION >= 50300 && defined( HAVE_STREAM_CB_IN_DVDNAV_H )
 #define HAVE_DVDNAV_DEMUX
 static int  DemuxOpen ( vlc_object_t * );
 #endif
@@ -138,9 +138,6 @@ struct demux_sys_t
     ps_track_t  tk[PS_TK_COUNT];
     int         i_mux_rate;
 
-    /* for spu variables */
-    input_thread_t *p_input;
-
     /* event */
     vout_thread_t *p_vout;
 
@@ -159,7 +156,7 @@ struct demux_sys_t
     int           i_title;
     input_title_t **title;
 
-    /* lenght of program group chain */
+    /* length of program group chain */
     mtime_t     i_pgc_length;
     int         i_vobu_index;
     int         i_vobu_flush;
@@ -294,9 +291,9 @@ static int CommonOpen( vlc_object_t *p_this,
         if( dvdnav_title_play( p_sys->dvdnav, 1 ) != DVDNAV_STATUS_OK )
         {
             msg_Err( p_demux, "cannot set title (can't decrypt DVD?)" );
-            dialog_Fatal( p_demux, _("Playback failure"), "%s",
-                            _("VLC cannot set the DVD's title. It possibly "
-                              "cannot decrypt the entire disc.") );
+            vlc_dialog_display_error( p_demux, _("Playback failure"), "%s",
+                _("VLC cannot set the DVD's title. It possibly "
+                  "cannot decrypt the entire disc.") );
             free( p_sys );
             return VLC_EGENERIC;
         }
@@ -316,17 +313,16 @@ static int CommonOpen( vlc_object_t *p_this,
 
     /* FIXME hack hack hack hack FIXME */
     /* Get p_input and create variable */
-    p_sys->p_input = demux_GetParentInput( p_demux );
-    var_Create( p_sys->p_input, "x-start", VLC_VAR_INTEGER );
-    var_Create( p_sys->p_input, "y-start", VLC_VAR_INTEGER );
-    var_Create( p_sys->p_input, "x-end", VLC_VAR_INTEGER );
-    var_Create( p_sys->p_input, "y-end", VLC_VAR_INTEGER );
-    var_Create( p_sys->p_input, "color", VLC_VAR_ADDRESS );
-    var_Create( p_sys->p_input, "menu-palette", VLC_VAR_ADDRESS );
-    var_Create( p_sys->p_input, "highlight", VLC_VAR_BOOL );
+    var_Create( p_demux->p_input, "x-start", VLC_VAR_INTEGER );
+    var_Create( p_demux->p_input, "y-start", VLC_VAR_INTEGER );
+    var_Create( p_demux->p_input, "x-end", VLC_VAR_INTEGER );
+    var_Create( p_demux->p_input, "y-end", VLC_VAR_INTEGER );
+    var_Create( p_demux->p_input, "color", VLC_VAR_ADDRESS );
+    var_Create( p_demux->p_input, "menu-palette", VLC_VAR_ADDRESS );
+    var_Create( p_demux->p_input, "highlight", VLC_VAR_BOOL );
 
     /* catch vout creation event */
-    var_AddCallback( p_sys->p_input, "intf-event", EventIntf, p_demux );
+    var_AddCallback( p_demux->p_input, "intf-event", EventIntf, p_demux );
 
     p_sys->still.b_enabled = false;
     vlc_mutex_init( &p_sys->still.lock );
@@ -407,6 +403,19 @@ bailout:
  *****************************************************************************/
 static int StreamProbeDVD( stream_t *s )
 {
+    /* first sector should be filled with zeros */
+    ssize_t i_peek;
+    const uint8_t *p_peek;
+    i_peek = stream_Peek( s, &p_peek, 2048 );
+    if( i_peek < 512 ) {
+        return VLC_EGENERIC;
+    }
+    while (i_peek > 0) {
+        if (p_peek[ --i_peek ]) {
+            return VLC_EGENERIC;
+        }
+    }
+
     /* ISO 9660 volume descriptor */
     char iso_dsc[6];
     if( stream_Seek( s, 0x8000 + 1 ) != VLC_SUCCESS
@@ -501,7 +510,7 @@ static void Close( vlc_object_t *p_this )
     demux_sys_t *p_sys = p_demux->p_sys;
 
     /* Stop vout event handler */
-    var_DelCallback( p_sys->p_input, "intf-event", EventIntf, p_demux );
+    var_DelCallback( p_demux->p_input, "intf-event", EventIntf, p_demux );
     if( p_sys->p_vout != NULL )
     {   /* Should not happen, but better be safe than sorry. */
         msg_Warn( p_sys->p_vout, "removing dangling mouse DVD callbacks" );
@@ -514,15 +523,13 @@ static void Close( vlc_object_t *p_this )
         vlc_timer_destroy( p_sys->still.timer );
     vlc_mutex_destroy( &p_sys->still.lock );
 
-    var_Destroy( p_sys->p_input, "highlight" );
-    var_Destroy( p_sys->p_input, "x-start" );
-    var_Destroy( p_sys->p_input, "x-end" );
-    var_Destroy( p_sys->p_input, "y-start" );
-    var_Destroy( p_sys->p_input, "y-end" );
-    var_Destroy( p_sys->p_input, "color" );
-    var_Destroy( p_sys->p_input, "menu-palette" );
-
-    vlc_object_release( p_sys->p_input );
+    var_Destroy( p_demux->p_input, "highlight" );
+    var_Destroy( p_demux->p_input, "x-start" );
+    var_Destroy( p_demux->p_input, "x-end" );
+    var_Destroy( p_demux->p_input, "y-start" );
+    var_Destroy( p_demux->p_input, "y-end" );
+    var_Destroy( p_demux->p_input, "color" );
+    var_Destroy( p_demux->p_input, "menu-palette" );
 
     for( int i = 0; i < PS_TK_COUNT; i++ )
     {
@@ -964,7 +971,7 @@ static int Demux( demux_t *p_demux )
         msg_Dbg( p_demux, "     - cell_start=%"PRId64, event->cell_start );
         msg_Dbg( p_demux, "     - pg_start=%"PRId64, event->pg_start );
 
-        /* Store the lenght in time of the current PGC */
+        /* Store the length in time of the current PGC */
         p_sys->i_pgc_length = event->pgc_length / 90 * 1000;
         p_sys->i_vobu_index = 0;
         p_sys->i_vobu_flush = 0;
@@ -1121,7 +1128,7 @@ static void DemuxTitles( demux_t *p_demux )
 
     /* Menu */
     t = vlc_input_title_New();
-    t->b_menu = true;
+    t->i_flags = INPUT_TITLE_MENU | INPUT_TITLE_INTERACTIVE;
     t->psz_name = strdup( "DVD Menu" );
 
     s = vlc_seekpoint_New();
@@ -1232,13 +1239,13 @@ static void ButtonUpdate( demux_t *p_demux, bool b_mode )
         }
 
         vlc_global_lock( VLC_HIGHLIGHT_MUTEX );
-        var_SetInteger( p_sys->p_input, "x-start", hl.sx );
-        var_SetInteger( p_sys->p_input, "x-end",  hl.ex );
-        var_SetInteger( p_sys->p_input, "y-start", hl.sy );
-        var_SetInteger( p_sys->p_input, "y-end", hl.ey );
+        var_SetInteger( p_demux->p_input, "x-start", hl.sx );
+        var_SetInteger( p_demux->p_input, "x-end",  hl.ex );
+        var_SetInteger( p_demux->p_input, "y-start", hl.sy );
+        var_SetInteger( p_demux->p_input, "y-end", hl.ey );
 
-        var_SetAddress( p_sys->p_input, "menu-palette", p_sys->palette );
-        var_SetBool( p_sys->p_input, "highlight", true );
+        var_SetAddress( p_demux->p_input, "menu-palette", p_sys->palette );
+        var_SetBool( p_demux->p_input, "highlight", true );
 
         msg_Dbg( p_demux, "buttonUpdate %d", i_button );
     }
@@ -1249,7 +1256,7 @@ static void ButtonUpdate( demux_t *p_demux, bool b_mode )
 
         /* Show all */
         vlc_global_lock( VLC_HIGHLIGHT_MUTEX );
-        var_SetBool( p_sys->p_input, "highlight", false );
+        var_SetBool( p_demux->p_input, "highlight", false );
     }
     vlc_global_unlock( VLC_HIGHLIGHT_MUTEX );
 }
@@ -1354,7 +1361,7 @@ static int DemuxBlock( demux_t *p_demux, const uint8_t *p, int len )
                     ESNew( p_demux, i_id );
                 }
                 if( tk->b_seen && tk->es &&
-                    !ps_pkt_parse_pes( p_demux, p_pkt, tk->i_skip ) )
+                    !ps_pkt_parse_pes( VLC_OBJECT(p_demux), p_pkt, tk->i_skip ) )
                 {
                     es_out_Send( p_demux->out, tk->es, p_pkt );
                 }

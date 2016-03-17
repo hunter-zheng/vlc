@@ -22,19 +22,12 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#ifndef _MKV_H_
-#define _MKV_H_
+#ifndef VLC_MKV_MKV_HPP_
+#define VLC_MKV_MKV_HPP_
 
 /*****************************************************************************
  * Preamble
  *****************************************************************************/
-
-
-/* config.h may include inttypes.h, so make sure we define that option
- * early enough. */
-#define __STDC_FORMAT_MACROS 1
-#define __STDC_CONSTANT_MACROS 1
-#define __STDC_LIMIT_MACROS 1
 
 #ifdef HAVE_CONFIG_H
 # include "config.h"
@@ -119,10 +112,10 @@ enum
 #define MKVD_TIMECODESCALE 1000000
 
 #define MKV_IS_ID( el, C ) ( el != NULL && typeid( *el ) == typeid( C ) )
+#define MKV_CHECKED_PTR_DECL( name, type, src ) type * name = MKV_IS_ID(src, type) ? static_cast<type*>(src) : NULL
 
 
 using namespace LIBMATROSKA_NAMESPACE;
-using namespace std;
 
 void BlockDecode( demux_t *p_demux, KaxBlock *block, KaxSimpleBlock *simpleblock,
                   mtime_t i_pts, mtime_t i_duration, bool b_key_picture,
@@ -253,6 +246,10 @@ struct mkv_index_t
     mtime_t i_mk_time;
 
     bool       b_key;
+
+    bool operator< (mkv_index_t const& rhs) const {
+        return i_mk_time < rhs.i_mk_time;
+    }
 };
 
 

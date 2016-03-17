@@ -79,6 +79,7 @@ int Import_RAM( vlc_object_t *p_this )
     demux_t *p_demux = (demux_t *)p_this;
     const uint8_t *p_peek;
 
+    CHECK_FILE();
     if(! demux_IsPathExtension( p_demux, ".ram" ) ||
          demux_IsPathExtension( p_demux, ".rm" ) )
         return VLC_EGENERIC;
@@ -293,7 +294,7 @@ static int Demux( demux_t *p_demux )
                     }
                     else if( !strcmp( psz_param, "author" ) )
                     {
-                        psz_author = decode_URI_duplicate(psz_value);
+                        psz_author = vlc_uri_decode_duplicate(psz_value);
                         EnsureUTF8( psz_author );
                     }
                     else if( !strcmp( psz_param, "start" )
@@ -319,12 +320,13 @@ static int Demux( demux_t *p_demux )
                     }
                     else if( !strcmp( psz_param, "title" ) )
                     {
-                        psz_title = decode_URI_duplicate(psz_value);
+                        free( psz_title );
+                        psz_title = vlc_uri_decode_duplicate(psz_value);
                         EnsureUTF8( psz_title );
                     }
                     else if( !strcmp( psz_param, "copyright" ) )
                     {
-                        psz_copyright = decode_URI_duplicate(psz_value);
+                        psz_copyright = vlc_uri_decode_duplicate(psz_value);
                         EnsureUTF8( psz_copyright );
                     }
                     else
@@ -445,19 +447,19 @@ static void ParseClipInfo( const char *psz_clipinfo, char **ppsz_artist, char **
         }
         /* Put into args */
         if( !strcmp( psz_param, "artist name" ) )
-            *ppsz_artist = decode_URI_duplicate( psz_value );
+            *ppsz_artist = vlc_uri_decode_duplicate( psz_value );
         else if( !strcmp( psz_param, "title" ) )
-            *ppsz_title = decode_URI_duplicate( psz_value );
+            *ppsz_title = vlc_uri_decode_duplicate( psz_value );
         else if( !strcmp( psz_param, "album name" ) )
-            *ppsz_album = decode_URI_duplicate( psz_value );
+            *ppsz_album = vlc_uri_decode_duplicate( psz_value );
         else if( !strcmp( psz_param, "genre" ) )
-            *ppsz_genre = decode_URI_duplicate( psz_value );
+            *ppsz_genre = vlc_uri_decode_duplicate( psz_value );
         else if( !strcmp( psz_param, "year" ) )
-            *ppsz_year = decode_URI_duplicate( psz_value );
+            *ppsz_year = vlc_uri_decode_duplicate( psz_value );
         else if( !strcmp( psz_param, "cdnum" ) )
-            *ppsz_cdnum = decode_URI_duplicate( psz_value );
+            *ppsz_cdnum = vlc_uri_decode_duplicate( psz_value );
         else if( !strcmp( psz_param, "comments" ) )
-            *ppsz_comments = decode_URI_duplicate( psz_value );
+            *ppsz_comments = vlc_uri_decode_duplicate( psz_value );
 
         free( psz_suboption );
         psz_option_next++;

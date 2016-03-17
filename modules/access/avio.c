@@ -31,6 +31,7 @@
 #include <vlc_access.h>
 #include <vlc_sout.h>
 #include <vlc_avcodec.h>
+#include <vlc_interrupt.h>
 
 #include "avio.h"
 #include "../codec/avcodec/avcommon.h"
@@ -70,13 +71,18 @@ static int     OutSeek (sout_access_out_t *, off_t);
 
 static int UrlInterruptCallback(void *access)
 {
-    return !vlc_object_alive((access_t *)access);
+    /* NOTE: This works so long as libavformat invokes the callback from the
+     * same thread that invokes libavformat. Currently libavformat does not
+     * create internal threads at all. This is not proper event handling in any
+     * case; libavformat needs fixing. */
+    (void) access;
+    return vlc_killed();
 }
 
 struct access_sys_t
 {
     AVIOContext *context;
-    uint64_t size;
+    int64_t size;
 };
 
 struct sout_access_out_sys_t {
@@ -173,7 +179,7 @@ int OpenAvio(vlc_object_t *object)
 #if LIBAVFORMAT_VERSION_MAJOR < 54
     /* We can accept only one active user at any time */
     if (SetupAvioCb(VLC_OBJECT(access))) {
-        msg_Err(access, "Module aready in use");
+        msg_Err(access, "Module already in use");
         avio_close(sys->context);
         goto error;
     }
@@ -187,7 +193,6 @@ int OpenAvio(vlc_object_t *object)
     seekable = sys->context->seekable;
 #endif
     msg_Dbg(access, "%sseekable, size=%"PRIi64, seekable ? "" : "not ", size);
-    sys->size = size > 0 ? size : 0;
 
     /* */
     access_InitFields(access);
@@ -255,7 +260,7 @@ int OutOpenAvio(vlc_object_t *object)
 #if LIBAVFORMAT_VERSION_MAJOR < 54
     /* We can accept only one active user at any time */
     if (SetupAvioCb(VLC_OBJECT(access))) {
-        msg_Err(access, "Module aready in use");
+        msg_Err(access, "Module already in use");
         goto error;
     }
 #endif
@@ -301,9 +306,7 @@ void OutCloseAvio(vlc_object_t *object)
 static ssize_t Read(access_t *access, uint8_t *data, size_t size)
 {
     int r = avio_read(access->p_sys->context, data, size);
-    if (r > 0)
-        access->info.i_pos += r;
-    else {
+    if (r <= 0) {
         access->info.b_eof = true;
         r = 0;
     }
@@ -367,10 +370,9 @@ static int Seek(access_t *access, uint64_t position)
     if (ret < 0) {
         msg_Err(access, "Seek to %"PRIu64" failed: %s", position,
                 vlc_strerror_c(AVUNERROR(ret)));
-        if (sys->size == 0 || position != sys->size)
+        if (sys->size < 0 || position != sys->size)
             return VLC_EGENERIC;
     }
-    access->info.i_pos = position;
     access->info.b_eof = false;
     return VLC_SUCCESS;
 }
@@ -431,6 +433,8 @@ static int Control(access_t *access, int query, va_list args)
         *b = true; /* FIXME */
         return VLC_SUCCESS;
     case ACCESS_GET_SIZE:
+        if (sys->size < 0)
+            return VLC_EGENERIC;
         *va_arg(args, uint64_t *) = sys->size;
         return VLC_SUCCESS;
     case ACCESS_GET_PTS_DELAY: {

@@ -851,8 +851,8 @@ static int DirectXCreateSurface(vout_display_t *vd,
     ddsd.dwSize   = sizeof(ddsd);
     ddsd.ddpfPixelFormat.dwSize = sizeof(ddsd.ddpfPixelFormat);
     ddsd.dwFlags  = DDSD_HEIGHT | DDSD_WIDTH;
-    ddsd.dwWidth  = fmt->i_visible_width;
-    ddsd.dwHeight = fmt->i_visible_height;
+    ddsd.dwWidth  = fmt->i_width;
+    ddsd.dwHeight = fmt->i_height;
     if (fourcc) {
         ddsd.dwFlags |= DDSD_PIXELFORMAT;
         ddsd.ddpfPixelFormat.dwFlags = DDPF_FOURCC;
@@ -861,8 +861,9 @@ static int DirectXCreateSurface(vout_display_t *vd,
     if (use_overlay) {
         ddsd.dwFlags |= DDSD_CAPS;
         ddsd.ddsCaps.dwCaps = DDSCAPS_OVERLAY | DDSCAPS_VIDEOMEMORY;
+        ddsd.ddsCaps.dwCaps |= DDSCAPS_FLIP | DDSCAPS_FRONTBUFFER;
         if (backbuffer_count > 0)
-            ddsd.ddsCaps.dwCaps |= DDSCAPS_COMPLEX | DDSCAPS_FLIP;
+            ddsd.ddsCaps.dwCaps |= DDSCAPS_COMPLEX;
 
         if (backbuffer_count > 0) {
             ddsd.dwFlags |= DDSD_BACKBUFFERCOUNT;
@@ -1016,7 +1017,7 @@ static int DirectXCreatePictureResourceYuvOverlay(vout_display_t *vd,
         ret = DirectXCreateSurface(vd, &front_surface, fmt, fourcc, true, false, 0);
     if (ret)
         return VLC_EGENERIC;
-    msg_Dbg(vd, "YUV overlay surface created successfully");
+    msg_Dbg(vd, "YUV overlay surface (%4.4s) created successfully", (const char *)&fourcc);
 
     /* Get the back buffer */
     LPDIRECTDRAWSURFACE2 surface;
@@ -1083,7 +1084,7 @@ static int DirectXCreatePictureResourceYuv(vout_display_t *vd,
     LPDIRECTDRAWSURFACE2 surface;
     if (DirectXCreateSurface(vd, &surface, fmt, fourcc, false, allow_sysmem, 0))
         return VLC_EGENERIC;
-    msg_Dbg(vd, "YUV plain surface created successfully");
+    msg_Dbg(vd, "YUV plain surface (%4.4s) created successfully", (const char *)&fourcc);
 
     if (DirectXCheckLockingSurface(surface, surface)) {
         DirectXDestroySurface(surface);
@@ -1143,7 +1144,7 @@ static int DirectXCreatePictureResourceRgb(vout_display_t *vd,
         ret = DirectXCreateSurface(vd, &surface, fmt, 0, false, true, 0);
     if (ret)
         return VLC_EGENERIC;
-    msg_Dbg(vd, "RGB plain surface created successfully");
+    msg_Dbg(vd, "RGB plain surface (%4.4s) created successfully", (const char *)&fmt->i_chroma);
 
     if (DirectXCheckLockingSurface(surface, surface)) {
         DirectXDestroySurface(surface);
@@ -1188,10 +1189,20 @@ static int DirectXCreatePictureResource(vout_display_t *vd,
 
                 if (pass == 0) {
                     if (DirectXCreatePictureResourceYuvOverlay(vd, fmt, fourcc))
+                    {
+#ifndef NDEBUG
+                        msg_Dbg(vd, "Failed to create YUV overlay surface %4.4s", (const char*)&fourcc);
+#endif
                         continue;
+                    }
                 } else {
                     if (DirectXCreatePictureResourceYuv(vd, fmt, fourcc))
+                    {
+#ifndef NDEBUG
+                        msg_Dbg(vd, "Failed to create YUV surface %4.4s", (const char*)&fourcc);
+#endif
                         continue;
+                    }
                 }
                 /* */
                 *use_overlay = pass == 0;
@@ -1335,7 +1346,7 @@ static int DirectXUpdateOverlay(vout_display_t *vd, LPDIRECTDRAWSURFACE2 surface
     sys->restore_overlay = hr != DD_OK;
 
     if (hr != DD_OK) {
-        msg_Warn(vd, "DirectDrawUpdateOverlay cannot move/resize overlay");
+        msg_Warn(vd, "DirectDrawUpdateOverlay cannot move/resize overlay. (hr=0x%lX)", hr);
         return VLC_EGENERIC;
     }
     return VLC_SUCCESS;

@@ -51,6 +51,11 @@ static inline void avcodec_free_context( AVCodecContext **ctx )
 }
 #endif
 
+#if !LIBAVCODEC_VERSION_CHECK( 55, 28, 1, 45, 101 )
+# define av_frame_alloc avcodec_alloc_frame
+# define av_frame_free avcodec_free_frame
+#endif
+
 #endif /* HAVE_LIBAVCODEC_AVCODEC_H */
 
 #ifdef HAVE_LIBAVUTIL_AVUTIL_H
@@ -69,6 +74,15 @@ static inline void avcodec_free_context( AVCodecContext **ctx )
 #endif
 
 #endif /* HAVE_LIBAVUTIL_AVUTIL_H */
+
+#if LIBAVUTIL_VERSION_MAJOR >= 55
+# define FF_API_AUDIOCONVERT 1
+#endif
+
+/* libavutil/pixfmt.h */
+#ifndef PixelFormat
+# define PixelFormat AVPixelFormat
+#endif
 
 #ifdef HAVE_LIBAVFORMAT_AVFORMAT_H
 # include <libavformat/avformat.h>

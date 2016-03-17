@@ -108,6 +108,7 @@ static const char *const ppsz_pos_descriptions[] =
 static int  Open ( vlc_object_t * );
 static void Close( vlc_object_t * );
 static subpicture_t *Decode( decoder_t *, block_t ** );
+static void Flush( decoder_t * );
 
 #ifdef ENABLE_SOUT
 static int OpenEncoder  ( vlc_object_t * );
@@ -334,6 +335,7 @@ static int Open( vlc_object_t *p_this )
     }
 
     p_dec->pf_decode_sub = Decode;
+    p_dec->pf_flush      = Flush;
     p_sys = p_dec->p_sys = calloc( 1, sizeof(decoder_sys_t) );
     if( !p_sys )
         return VLC_ENOMEM;
@@ -390,6 +392,16 @@ static void Close( vlc_object_t *p_this )
 }
 
 /*****************************************************************************
+ * Flush:
+ *****************************************************************************/
+static void Flush( decoder_t *p_dec )
+{
+    decoder_sys_t *p_sys = p_dec->p_sys;
+
+    p_sys->i_pts = VLC_TS_INVALID;
+}
+
+/*****************************************************************************
  * Decode:
  *****************************************************************************/
 static subpicture_t *Decode( decoder_t *p_dec, block_t **pp_block )
@@ -402,9 +414,19 @@ static subpicture_t *Decode( decoder_t *p_dec, block_t **pp_block )
     p_block = *pp_block;
     *pp_block = NULL;
 
+    if( p_block->i_flags & (BLOCK_FLAG_DISCONTINUITY | BLOCK_FLAG_CORRUPTED) )
+    {
+        Flush( p_dec );
+        if( p_block->i_flags & BLOCK_FLAG_CORRUPTED )
+        {
+            block_Release( p_block );
+            return NULL;
+        }
+    }
+
     /* configure for SD res in case DDS is not present */
     /* a change of PTS is a good indication we must get a new DDS */
-    if (p_sys->i_pts != p_block->i_pts)
+    if( p_sys->i_pts != p_block->i_pts )
         default_dds_init( p_dec );
 
     p_sys->i_pts = p_block->i_pts;
@@ -1644,7 +1666,7 @@ static subpicture_t *render( decoder_t *p_dec )
             fmt.i_x_offset = fmt.i_y_offset = 0;
             p_spu_region = subpicture_region_New( &fmt );
 
-            p_spu_region->psz_text = strdup( p_object_def->psz_text );
+            p_spu_region->p_text = text_segment_New( p_object_def->psz_text );
             p_spu_region->i_x = i_base_x + p_regiondef->i_x + p_object_def->i_x;
             p_spu_region->i_y = i_base_y + p_regiondef->i_y + p_object_def->i_y;
             p_spu_region->i_align = p_sys->i_spu_position;
@@ -1966,10 +1988,7 @@ static block_t *Encode( encoder_t *p_enc, subpicture_t *p_subpic )
     if( ( p_region->fmt.i_chroma != VLC_CODEC_TEXT ) &&
         ( p_region->fmt.i_chroma != VLC_CODEC_YUVP ) )
     {
-        char psz_fourcc[5];
-        memset( &psz_fourcc, 0, sizeof( psz_fourcc ) );
-        vlc_fourcc_to_char( p_region->fmt.i_chroma, &psz_fourcc );
-        msg_Err( p_enc, "chroma %4.4s not supported", psz_fourcc );
+        msg_Err( p_enc, "chroma %4.4s not supported", (char *)&p_region->fmt.i_chroma );
         return NULL;
     }
 
@@ -2306,14 +2325,14 @@ static void encode_object( encoder_t *p_enc, bs_t *s, subpicture_t *p_subpic )
         {
             int i_size, i;
 
-            if( !p_region->psz_text ) continue;
+            if( !p_region->p_text ) continue;
 
-            i_size = __MIN( strlen( p_region->psz_text ), 256 );
+            i_size = __MIN( strlen( p_region->p_text->psz_text ), 256 );
 
             bs_write( s, 8, i_size ); /* number of characters in string */
             for( i = 0; i < i_size; i++ )
             {
-                bs_write( s, 16, p_region->psz_text[i] );
+                bs_write( s, 16, p_region->p_text->psz_text[i] );
             }
 
             /* Update segment length */

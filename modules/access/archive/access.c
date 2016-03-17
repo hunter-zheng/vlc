@@ -51,12 +51,12 @@ static ssize_t Read(access_t *p_access, uint8_t *p_data, size_t i_size)
 {
     access_sys_t *p_sys = p_access->p_sys;
 
-    size_t i_read = 0;
+    ssize_t i_read = 0;
 
     i_read = archive_read_data(p_sys->p_archive, p_data, i_size);
 
-    if (i_read > 0)
-        p_access->info.i_pos += i_read;
+    if (i_read < 0)
+        i_read = 0;
 
     if (i_size > 0 && i_read <= 0)
         p_access->info.b_eof = true;
@@ -72,11 +72,7 @@ static int Seek(access_t *p_access, uint64_t i_pos)
         return VLC_EGENERIC;
 
     int64_t i_ret = archive_seek_data(p_sys->p_archive, i_pos, SEEK_SET);
-    if ( i_ret < ARCHIVE_OK )
-        return VLC_EGENERIC;
-    p_access->info.i_pos = i_ret;
-
-    return VLC_SUCCESS;
+    return ( i_ret < ARCHIVE_OK ) ? VLC_EGENERIC : VLC_SUCCESS;
 }
 
 static int FindVolumes(access_t *p_access, struct archive *p_archive, const char *psz_uri,
@@ -321,7 +317,7 @@ int AccessOpen(vlc_object_t *p_object)
     char *psz_name = psz_base + (sep - p_access->psz_location);
     *(psz_name++) = '\0';
 
-    if (decode_URI(psz_base) == NULL)
+    if (vlc_uri_decode(psz_base) == NULL)
     {
         free(psz_base);
         return VLC_EGENERIC;

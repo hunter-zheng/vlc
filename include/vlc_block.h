@@ -51,7 +51,8 @@
  *   optimised for preheader/postdatas increase)
  ****************************************************************************/
 
-/** The content doesn't follow the last block, or is probably broken */
+/** The content doesn't follow the last block, possible some blocks in between
+ *  have been lost */
 #define BLOCK_FLAG_DISCONTINUITY 0x0001
 /** Intra frame */
 #define BLOCK_FLAG_TYPE_I        0x0002
@@ -137,6 +138,7 @@ struct block_t
  ****************************************************************************/
 VLC_API void block_Init( block_t *, void *, size_t );
 VLC_API block_t *block_Alloc( size_t ) VLC_USED VLC_MALLOC;
+block_t *block_TryRealloc(block_t *, ssize_t pre, size_t body) VLC_USED;
 VLC_API block_t *block_Realloc( block_t *, ssize_t i_pre, size_t i_body ) VLC_USED;
 
 static inline void block_CopyProperties( block_t *dst, block_t *src )
@@ -324,6 +326,7 @@ VLC_API void vlc_fifo_Unlock(vlc_fifo_t *);
 VLC_API void vlc_fifo_Signal(vlc_fifo_t *);
 VLC_API void vlc_fifo_Wait(vlc_fifo_t *);
 VLC_API void vlc_fifo_WaitCond(vlc_fifo_t *, vlc_cond_t *);
+int vlc_fifo_TimedWaitCond(vlc_fifo_t *, vlc_cond_t *, mtime_t);
 VLC_API void vlc_fifo_QueueUnlocked(vlc_fifo_t *, block_t *);
 VLC_API block_t *vlc_fifo_DequeueUnlocked(vlc_fifo_t *) VLC_USED;
 VLC_API block_t *vlc_fifo_DequeueAllUnlocked(vlc_fifo_t *) VLC_USED;

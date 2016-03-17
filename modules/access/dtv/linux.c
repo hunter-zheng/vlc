@@ -26,6 +26,7 @@
 
 #include <vlc_common.h>
 #include <vlc_fs.h>
+#include <vlc_interrupt.h>
 
 #include <errno.h>
 #include <assert.h>
@@ -343,7 +344,7 @@ ssize_t dvb_read (dvb_device_t *d, void *buf, size_t len)
     else
         n = 1;
 
-    if (poll (ufd, n, 500 /* FIXME */) < 0)
+    if (vlc_poll_i11e (ufd, n, -1) < 0)
         return -1;
 
     if (d->frontend != -1 && ufd[1].revents)
@@ -447,6 +448,18 @@ void dvb_remove_pid (dvb_device_t *d, uint16_t pid)
         }
     }
 #endif
+}
+
+bool dvb_get_pid_state (const dvb_device_t *d, uint16_t pid)
+{
+    if (d->budget)
+        return true;
+
+    for (size_t i = 0; i < MAX_PIDS; i++)
+        if (d->pids[i].pid == pid)
+            return true;
+
+    return false;
 }
 
 /** Finds a frontend of the correct type */
@@ -1118,9 +1131,10 @@ int dvb_set_isdbt (dvb_device_t *d, uint32_t freq, uint32_t bandwidth,
 
     if (dvb_find_frontend (d, ISDB_T))
         return -1;
-    if (dvb_set_props (d, 5, DTV_CLEAR, 0, DTV_DELIVERY_SYSTEM, SYS_ISDBT,
+    if (dvb_set_props (d, 6, DTV_CLEAR, 0, DTV_DELIVERY_SYSTEM, SYS_ISDBT,
                        DTV_FREQUENCY, freq, DTV_BANDWIDTH_HZ, bandwidth,
-                       DTV_GUARD_INTERVAL, guard))
+                       DTV_GUARD_INTERVAL, guard,
+                       DTV_ISDBT_LAYER_ENABLED, 0x7 /* all layers enabled */))
         return -1;
     for (unsigned i = 0; i < 3; i++)
         if (dvb_set_isdbt_layer (d, i, layers + i))

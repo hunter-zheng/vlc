@@ -191,9 +191,6 @@ static inline void vlc_fourcc_to_char( vlc_fourcc_t fcc, char *psz_fourcc )
     memcpy( psz_fourcc, &fcc, 4 );
 }
 
-#define vlc_fourcc_to_char( a, b ) \
-        vlc_fourcc_to_char( (vlc_fourcc_t)(a), (char *)(b) )
-
 /*****************************************************************************
  * Classes declaration
  *****************************************************************************/
@@ -294,7 +291,6 @@ typedef struct filter_t filter_t;
 typedef struct filter_sys_t filter_sys_t;
 
 /* Network */
-typedef struct virtual_socket_t v_socket_t;
 typedef struct vlc_url_t vlc_url_t;
 
 /* Misc */
@@ -341,7 +337,6 @@ typedef union
     char *          psz_string;
     void *          p_address;
     vlc_list_t *    p_list;
-    mtime_t         i_time;
     struct { int32_t x; int32_t y; } coords;
 
 } vlc_value_t;
@@ -387,12 +382,6 @@ typedef int ( * vlc_list_callback_t ) ( vlc_object_t *,      /* variable's objec
                                         vlc_value_t *,      /* new/deleted value  */
                                         void *);                 /* callback data */
 
-typedef enum
-{
-    vlc_value_callback,
-    vlc_list_callback
-} vlc_callback_type_t;
-
 /*****************************************************************************
  * OS-specific headers and thread types
  *****************************************************************************/
@@ -404,8 +393,9 @@ typedef enum
 #   include <windows.h>
 #endif
 
-#ifdef __SYMBIAN32__
- #include <sys/syslimits.h>
+#ifdef __APPLE__
+#include <sys/syslimits.h>
+#include <AvailabilityMacros.h>
 #endif
 
 #ifdef __OS2__
@@ -552,6 +542,23 @@ static inline unsigned popcount (unsigned x)
     return __builtin_popcount (x);
 #else
     unsigned count = 0;
+    while (x)
+    {
+        count += x & 1;
+        x = x >> 1;
+    }
+    return count;
+#endif
+}
+
+/** Bit weight of long long */
+VLC_USED
+static inline int popcountll(unsigned long long x)
+{
+#if VLC_GCC_VERSION(3,4)
+    return __builtin_popcountll(x);
+#else
+    int count = 0;
     while (x)
     {
         count += x & 1;
@@ -804,9 +811,6 @@ static inline void SetQWLE (void *p, uint64_t qw)
 VLC_API bool vlc_ureduce( unsigned *, unsigned *, uint64_t, uint64_t, uint64_t );
 
 /* Aligned memory allocator */
-#ifdef __APPLE__
-#include <AvailabilityMacros.h>
-#endif
 
 #ifdef __MINGW32__
 # define vlc_memalign(align, size) (__mingw_aligned_malloc(size, align))
@@ -814,26 +818,6 @@ VLC_API bool vlc_ureduce( unsigned *, unsigned *, uint64_t, uint64_t, uint64_t )
 #elif defined(_MSC_VER)
 # define vlc_memalign(align, size) (_aligned_malloc(size, align))
 # define vlc_free(base)            (_aligned_free(base))
-#elif defined(__APPLE__) && !defined(MAC_OS_X_VERSION_10_6)
-static inline void *vlc_memalign(size_t align, size_t size)
-{
-    long diff;
-    void *ptr;
-
-    ptr = malloc(size+align);
-    if(!ptr)
-        return ptr;
-    diff = ((-(long)ptr - 1)&(align-1)) + 1;
-    ptr  = (char*)ptr + diff;
-    ((char*)ptr)[-1]= diff;
-    return ptr;
-}
-
-static void vlc_free(void *ptr)
-{
-    if (ptr)
-        free((char*)ptr - ((char*)ptr)[-1]);
-}
 #else
 static inline void *vlc_memalign(size_t align, size_t size)
 {
@@ -844,8 +828,6 @@ static inline void *vlc_memalign(size_t align, size_t size)
 }
 # define vlc_free(base) free(base)
 #endif
-
-VLC_API void vlc_tdestroy( void *, void (*)(void *) );
 
 /*****************************************************************************
  * I18n stuff
@@ -914,7 +896,7 @@ VLC_API const char * VLC_Compiler( void ) VLC_USED;
 #include "vlc_main.h"
 #include "vlc_configuration.h"
 
-#if defined( _WIN32 ) || defined( __SYMBIAN32__ ) || defined( __OS2__ )
+#if defined( _WIN32 ) || defined( __OS2__ )
 #   define DIR_SEP_CHAR '\\'
 #   define DIR_SEP "\\"
 #   define PATH_SEP_CHAR ';'

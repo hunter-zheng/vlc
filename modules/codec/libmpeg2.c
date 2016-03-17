@@ -241,6 +241,7 @@ static int OpenDecoder( vlc_object_t *p_this )
     p_sys->p_info = mpeg2_info( p_sys->p_mpeg2dec );
 
     p_dec->pf_decode_video = DecodeBlock;
+    p_dec->pf_flush        = Reset;
     p_dec->fmt_out.i_cat = VIDEO_ES;
     p_dec->fmt_out.i_codec = 0;
 
@@ -261,7 +262,7 @@ static picture_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
         return NULL;
 
     p_block = *pp_block;
-    if( p_block->i_flags & (BLOCK_FLAG_DISCONTINUITY | BLOCK_FLAG_CORRUPTED) )
+    if( p_block->i_flags & (BLOCK_FLAG_CORRUPTED) )
         Reset( p_dec );
 
     while( 1 )
@@ -388,7 +389,7 @@ static picture_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
 
             picture_t *p_pic;
 
-            if( !p_dec->b_pace_control && !p_sys->b_preroll &&
+            if( p_dec->b_frame_drop_allowed && !p_sys->b_preroll &&
                 !(p_sys->b_slice_i
                    && ((p_current->flags
                          & PIC_MASK_CODING_TYPE) == PIC_FLAG_CODING_TYPE_P))

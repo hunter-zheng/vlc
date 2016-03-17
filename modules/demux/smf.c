@@ -168,6 +168,7 @@ int HandleMeta (demux_t *p_demux, mtrk_t *tr)
         case 0x06: /* Marker text */
             EnsureUTF8 ((char *)payload);
             msg_Info (p_demux, "Marker    : %s", (char *)payload);
+            break;
 
         case 0x07: /* Cue point (WAVE filename) */
             EnsureUTF8 ((char *)payload);
@@ -497,6 +498,9 @@ static int Control (demux_t *demux, int i_query, va_list args)
 
     switch (i_query)
     {
+        case DEMUX_CAN_SEEK:
+            *va_arg (args, bool *) = true;
+            break;
         case DEMUX_GET_POSITION:
             if (!sys->duration)
                 return VLC_EGENERIC;

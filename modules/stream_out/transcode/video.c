@@ -127,10 +127,10 @@ int transcode_video_new( sout_stream_t *p_stream, sout_stream_id_sys_t *id )
      */
     id->p_decoder->fmt_out = id->p_decoder->fmt_in;
     id->p_decoder->fmt_out.i_extra = 0;
-    id->p_decoder->fmt_out.p_extra = 0;
+    id->p_decoder->fmt_out.p_extra = NULL;
+    id->p_decoder->fmt_out.psz_language = NULL;
     id->p_decoder->pf_decode_video = NULL;
     id->p_decoder->pf_get_cc = NULL;
-    id->p_decoder->pf_get_cc = 0;
     id->p_decoder->pf_vout_format_update = video_update_format_decoder;
     id->p_decoder->pf_vout_buffer_new = video_new_buffer_decoder;
     id->p_decoder->p_owner = malloc( sizeof(decoder_owner_sys_t) );
@@ -589,8 +589,11 @@ void transcode_video_close( sout_stream_t *p_stream,
         block_ChainRelease( p_stream->p_sys->p_buffers );
     }
 
-    vlc_mutex_destroy( &p_stream->p_sys->lock_out );
-    vlc_cond_destroy( &p_stream->p_sys->cond );
+    if( p_stream->p_sys->i_threads >= 1 )
+    {
+        vlc_mutex_destroy( &p_stream->p_sys->lock_out );
+        vlc_cond_destroy( &p_stream->p_sys->cond );
+    }
 
     /* Close decoder */
     if( id->p_decoder->p_module )

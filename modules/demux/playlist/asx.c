@@ -119,7 +119,7 @@ static void ReadElement( xml_reader_t *p_xml_reader, char **ppsz_txt )
     xml_ReaderNextNode( p_xml_reader, &psz_node );
     free( *ppsz_txt );
     *ppsz_txt = strdup( psz_node );
-    resolve_xml_special_chars( *ppsz_txt );
+    vlc_xml_decode( *ppsz_txt );
 
     /* Read the end element */
     xml_ReaderNextNode( p_xml_reader, &psz_node );
@@ -145,6 +145,7 @@ int Import_ASX( vlc_object_t *p_this )
 {
     demux_t *p_demux = (demux_t *)p_this;
 
+    CHECK_FILE();
     if( demux_IsPathExtension( p_demux, ".asx" ) ||
         demux_IsPathExtension( p_demux, ".wax" ) ||
         demux_IsPathExtension( p_demux, ".wvx" ) ||
@@ -213,7 +214,7 @@ static void ProcessEntry( int *pi_n_entry, xml_reader_t *p_xml_reader,
                     ReadElement( p_xml_reader, &psz_moreinfo );
                 else
                     psz_moreinfo = strdup( psz_node );
-                resolve_xml_special_chars( psz_moreinfo );
+                vlc_xml_decode( psz_moreinfo );
             }
             else if( !strncasecmp( psz_node, "ABSTRACT", 8 ) )
                 ReadElement( p_xml_reader, &psz_description );
@@ -246,7 +247,7 @@ static void ProcessEntry( int *pi_n_entry, xml_reader_t *p_xml_reader,
 
                 if( asprintf( &psz_name, "%d. %s", *pi_n_entry, psz_title ) == -1)
                     psz_name = strdup( psz_title );
-                resolve_xml_special_chars( psz_href );
+                vlc_xml_decode( psz_href );
                 psz_mrl = ProcessMRL( psz_href, psz_prefix );
 
                 /* Add Time information */
@@ -283,6 +284,8 @@ static void ProcessEntry( int *pi_n_entry, xml_reader_t *p_xml_reader,
                     input_item_SetDuration( p_entry, i_duration );
 
                 input_item_node_AppendItem( p_subitems, p_entry );
+
+                input_item_Release( p_entry );
 
                 while( i_options )
                     free( ppsz_options[--i_options] );
@@ -372,7 +375,7 @@ static int Demux( demux_t *p_demux )
                 else
                     psz_txt = strdup( psz_node );
 
-                resolve_xml_special_chars( psz_txt );
+                vlc_xml_decode( psz_txt );
                 input_item_SetURL( p_current_input, psz_txt );
             }
             else if( !strncasecmp( psz_node, "ABSTRACT", 8 ) )
@@ -398,7 +401,7 @@ static int Demux( demux_t *p_demux )
                 /* Create new input item */
                 input_item_t *p_input;
                 psz_txt = strdup( psz_node );
-                resolve_xml_special_chars( psz_txt );
+                vlc_xml_decode( psz_txt );
                 p_input = input_item_New( psz_txt, psz_title_asx );
                 input_item_CopyOptions( p_current_input, p_input );
                 input_item_node_AppendItem( p_subitems, p_input );

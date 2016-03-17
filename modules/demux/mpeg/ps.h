@@ -24,6 +24,7 @@
 #include <assert.h>
 #include <vlc_demux.h>
 #include <vlc_memory.h>
+#include "timestamps.h"
 
 /* 256-0xC0 for normal stream, 256 for 0xbd stream, 256 for 0xfd stream, 8 for 0xa0 AOB stream */
 #define PS_TK_COUNT (256+256+256+8 - 0xc0)
@@ -192,8 +193,12 @@ static inline int ps_track_fill( ps_track_t *tk, ps_psm_t *p_psm, int i_id, bloc
             {
                 es_format_Init( &tk->fmt, VIDEO_ES, VLC_CODEC_MP4V );
             }
-            else if( i_type == 0x01 ||
-                     i_type == 0x02 )
+            else if( i_type == 0x01 )
+            {
+                es_format_Init( &tk->fmt, VIDEO_ES, VLC_CODEC_MPGV );
+                tk->fmt.i_original_fourcc = VLC_CODEC_MP1V;
+            }
+            else if( i_type == 0x02 )
             {
                 es_format_Init( &tk->fmt, VIDEO_ES, VLC_CODEC_MPGV );
             }

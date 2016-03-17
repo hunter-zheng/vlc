@@ -94,6 +94,9 @@ struct input_item_t
 
     int         i_preparse_depth;    /**< How many level of sub items can be preparsed:
                                           -1: recursive, 0: none, >0: n levels */
+
+    bool        b_preparse_interact; /**< Force interaction with the user when
+                                          preparsing.*/
 };
 
 TYPEDEF_ARRAY(input_item_t*, input_item_array_t)
@@ -113,12 +116,16 @@ enum input_item_type_e
     ITEM_TYPE_NUMBER
 };
 
+typedef int (*input_item_compar_cb)( input_item_t *, input_item_t * );
+
 struct input_item_node_t
 {
     input_item_t *         p_item;
     int                    i_children;
     input_item_node_t      **pp_children;
     input_item_node_t      *p_parent;
+    input_item_compar_cb   compar_cb;
+    bool                   b_can_loop;
 };
 
 VLC_API void input_item_CopyOptions( input_item_t *p_parent, input_item_t *p_child );
@@ -152,6 +159,12 @@ VLC_API input_item_node_t * input_item_node_AppendItem( input_item_node_t *p_nod
  * Add an already created node to children of this parent node.
  */
 VLC_API void input_item_node_AppendNode( input_item_node_t *p_parent, input_item_node_t *p_child );
+
+/**
+ * Sort all p_item children of the node recursively.
+ */
+VLC_API void input_item_node_Sort( input_item_node_t *p_node,
+                                   input_item_compar_cb compar_cb );
 
 /**
  * Delete a node created with input_item_node_Create() and all its children.
@@ -223,6 +236,7 @@ char *input_item_Get ## name (input_item_t *p_input) \
 
 INPUT_META(Title)
 INPUT_META(Artist)
+INPUT_META(AlbumArtist)
 INPUT_META(Genre)
 INPUT_META(Copyright)
 INPUT_META(Album)
@@ -245,6 +259,7 @@ INPUT_META(Season)
 INPUT_META(Episode)
 INPUT_META(ShowName)
 INPUT_META(Actors)
+INPUT_META(DiscNumber)
 
 #define input_item_SetTrackNum input_item_SetTrackNumber
 #define input_item_GetTrackNum input_item_GetTrackNumber
@@ -309,7 +324,8 @@ typedef enum input_item_meta_request_option_t
     META_REQUEST_OPTION_NONE          = 0x00,
     META_REQUEST_OPTION_SCOPE_LOCAL   = 0x01,
     META_REQUEST_OPTION_SCOPE_NETWORK = 0x02,
-    META_REQUEST_OPTION_SCOPE_ANY     = 0x03
+    META_REQUEST_OPTION_SCOPE_ANY     = 0x03,
+    META_REQUEST_OPTION_DO_INTERACT   = 0x04
 } input_item_meta_request_option_t;
 
 VLC_API int libvlc_MetaRequest(libvlc_int_t *, input_item_t *,

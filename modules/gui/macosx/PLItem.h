@@ -24,19 +24,11 @@
 #include <vlc_common.h>
 
 @interface PLItem : NSObject
-{
-    input_item_t *p_input;
-
-    int _playlistId;
-    NSMutableArray *_children;
-
-    PLItem *_parent;
-}
 
 @property(readonly, copy) NSMutableArray *children;
 @property(readonly) int plItemId;
 @property(readonly) input_item_t *input;
-@property(readwrite, retain) PLItem *parent;
+@property(readwrite, weak) PLItem *parent;
 
 - (id)initWithPlaylistItem:(playlist_item_t *)p_item;
 
@@ -47,4 +39,3 @@
 - (void)deleteChild:(PLItem *)child;
 
 @end
-

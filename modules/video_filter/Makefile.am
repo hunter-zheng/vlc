@@ -3,6 +3,8 @@ video_filterdir = $(pluginsdir)/video_filter
 noinst_HEADERS += video_filter/filter_picture.h
 
 # video filters
+libedgedetection_plugin_la_SOURCES = video_filter/edgedetection.c
+libedgedetection_plugin_la_LIBADD = $(LIBM)
 libadjust_plugin_la_SOURCES = video_filter/adjust.c video_filter/adjust_sat_hue.c video_filter/adjust_sat_hue.h
 libadjust_plugin_la_LIBADD = $(LIBM)
 libalphamask_plugin_la_SOURCES = video_filter/alphamask.c
@@ -75,6 +77,7 @@ video_filter_LTLIBRARIES = \
 	libcanvas_plugin.la \
 	libcolorthres_plugin.la \
 	libcroppadd_plugin.la \
+	libedgedetection_plugin.la \
 	liberase_plugin.la \
 	libextract_plugin.la \
 	libgradient_plugin.la \
@@ -105,31 +108,6 @@ video_filter_LTLIBRARIES = \
 	libfreeze_plugin.la \
 	libpuzzle_plugin.la \
 	librotate_plugin.la
-
-libatmo_plugin_la_SOURCES = video_filter/atmo/atmo.cpp \
-	video_filter/atmo/AtmoDefs.h \
-	video_filter/atmo/AtmoCalculations.cpp video_filter/atmo/AtmoCalculations.h \
-	video_filter/atmo/AtmoConfig.cpp video_filter/atmo/AtmoConfig.h \
-	video_filter/atmo/AtmoConnection.cpp video_filter/atmo/AtmoConnection.h \
-	video_filter/atmo/AtmoDynData.cpp video_filter/atmo/AtmoDynData.h \
-	video_filter/atmo/AtmoExternalCaptureInput.cpp video_filter/atmo/AtmoExternalCaptureInput.h \
-	video_filter/atmo/AtmoInput.cpp video_filter/atmo/AtmoInput.h \
-	video_filter/atmo/AtmoLiveView.cpp video_filter/atmo/AtmoLiveView.h \
-	video_filter/atmo/AtmoOutputFilter.cpp video_filter/atmo/AtmoOutputFilter.h \
-	video_filter/atmo/AtmoThread.cpp video_filter/atmo/AtmoThread.h \
-	video_filter/atmo/AtmoTools.cpp video_filter/atmo/AtmoTools.h \
-	video_filter/atmo/AtmoZoneDefinition.cpp video_filter/atmo/AtmoZoneDefinition.h \
-	video_filter/atmo/AtmoChannelAssignment.cpp video_filter/atmo/AtmoChannelAssignment.h \
-	video_filter/atmo/AtmoClassicConnection.cpp video_filter/atmo/AtmoClassicConnection.h \
-	video_filter/atmo/AtmoDmxSerialConnection.cpp video_filter/atmo/AtmoDmxSerialConnection.h \
-	video_filter/atmo/DmxTools.cpp video_filter/atmo/DmxTools.h \
-	video_filter/atmo/AtmoMultiConnection.cpp video_filter/atmo/AtmoMultiConnection.h \
-	video_filter/atmo/MoMoConnection.cpp video_filter/atmo/MoMoConnection.h \
-	video_filter/atmo/FnordlichtConnection.cpp video_filter/atmo/FnordlichtConnection.h \
-	video_filter/atmo/AtmoPacketQueue.cpp video_filter/atmo/AtmoPacketQueue.h
-libatmo_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(video_filterdir)'
-video_filter_LTLIBRARIES += $(LTLIBatmo)
-EXTRA_LTLIBRARIES += libatmo_plugin.la
 
 libdeinterlace_plugin_la_SOURCES = \
 	video_filter/deinterlace/deinterlace.c video_filter/deinterlace/deinterlace.h \

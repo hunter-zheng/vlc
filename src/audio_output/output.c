@@ -64,6 +64,15 @@ static int var_Copy (vlc_object_t *src, const char *name, vlc_value_t prev,
     return var_Set (dst, name, value);
 }
 
+static int var_CopyDevice (vlc_object_t *src, const char *name,
+                           vlc_value_t prev, vlc_value_t value, void *data)
+{
+    vlc_object_t *dst = data;
+
+    (void) src; (void) name; (void) prev;
+    return var_Set (dst, "audio-device", value);
+}
+
 /**
  * Supply or update the current custom ("hardware") volume.
  * @note This only makes sense after calling aout_VolumeHardInit().
@@ -192,6 +201,7 @@ audio_output_t *aout_New (vlc_object_t *parent)
     var_Create (aout, "mute", VLC_VAR_BOOL | VLC_VAR_DOINHERIT);
     var_AddCallback (aout, "mute", var_Copy, parent);
     var_Create (aout, "device", VLC_VAR_STRING);
+    var_AddCallback (aout, "device", var_CopyDevice, parent);
 
     aout->event.volume_report = aout_VolumeNotify;
     aout->event.mute_report = aout_MuteNotify;
@@ -238,7 +248,7 @@ audio_output_t *aout_New (vlc_object_t *parent)
     text.psz_string = _("Spectrum");
     var_Change (aout, "visual", VLC_VAR_ADDCHOICE, &val, &text);
     val.psz_string = (char *)"vuMeter";
-    text.psz_string = _("Vu meter");
+    text.psz_string = _("VU meter");
     var_Change (aout, "visual", VLC_VAR_ADDCHOICE, &val, &text);
     /* Look for goom plugin */
     if (module_exists ("goom"))
@@ -324,6 +334,7 @@ void aout_Destroy (audio_output_t *aout)
     aout_OutputUnlock (aout);
 
     var_DelCallback (aout, "audio-filter", FilterCallback, NULL);
+    var_DelCallback (aout, "device", var_CopyDevice, aout->p_parent);
     var_DelCallback (aout, "mute", var_Copy, aout->p_parent);
     var_SetFloat (aout, "volume", -1.f);
     var_DelCallback (aout, "volume", var_Copy, aout->p_parent);
@@ -374,16 +385,6 @@ int aout_OutputNew (audio_output_t *aout, audio_sample_format_t *restrict fmt)
     {
         msg_Err (aout, "module not functional");
         return -1;
-    }
-
-    if (!var_Type (aout, "stereo-mode"))
-    {
-        var_Create (aout, "stereo-mode",
-                    VLC_VAR_INTEGER | VLC_VAR_HASCHOICE | VLC_VAR_DOINHERIT);
-
-        vlc_value_t txt;
-        txt.psz_string = _("Stereo audio mode");
-        var_Change (aout, "stereo-mode", VLC_VAR_SETTEXT, &txt, NULL);
     }
 
     /* The user may have selected a different channels configuration. */
@@ -682,7 +683,7 @@ int aout_DeviceSet (audio_output_t *aout, const char *id)
  * The function will heap-allocate two tables of heap-allocated strings;
  * the caller is responsible for freeing all strings and both tables.
  *
- * \param ids pointer to a table of device identifiers [OUT]
+ * \param ids pointer to a table of device identifiers [OUT]
  * \param names pointer to a table of device human-readable descriptions [OUT]
  * \return the number of devices, or negative on error.
  * \note In case of error, *ids and *names are undefined.

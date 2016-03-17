@@ -41,6 +41,8 @@
 
 #include <opencv2/core/core_c.h>
 #include <opencv2/core/core.hpp>
+#include <opencv2/imgproc/imgproc_c.h>
+#include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/objdetect/objdetect.hpp>
 
 /*****************************************************************************
@@ -147,7 +149,7 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_pic )
 {
     IplImage** p_img = NULL;
     CvPoint pt1, pt2;
-    int i, scale = 1;
+    int scale = 1;
     filter_sys_t *p_sys = p_filter->p_sys;
  
     if ((!p_pic) )
@@ -187,7 +189,7 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_pic )
         }
 
         //populate the video_filter_region_info_t struct
-        for( i = 0; i < (faces ? faces->total : 0); i++ )
+        for( int i = 0; i < (faces ? faces->total : 0); i++ )
         {
             CvRect *r = (CvRect*)cvGetSeqElem( faces, i );
             pt1.x = r->x*scale;

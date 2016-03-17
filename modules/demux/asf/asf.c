@@ -258,8 +258,9 @@ static int Demux( demux_t *p_demux )
                 if( DemuxInit( p_demux ) )
                 {
                     msg_Err( p_demux, "failed to load the new header" );
-                    dialog_Fatal( p_demux, _("Could not demux ASF stream"), "%s",
-                                  _("VLC failed to load the ASF header.") );
+                    vlc_dialog_display_error( p_demux,
+                        _("Could not demux ASF stream"), "%s",
+                        _("VLC failed to load the ASF header.") );
                     return 0;
                 }
                 es_out_Control( p_demux->out, ES_OUT_RESET_PCR );
@@ -789,8 +790,8 @@ static int DemuxInit( demux_t *p_demux )
          || ASF_FindObject( p_sys->p_root->p_hdr,
                          &asf_object_advanced_content_encryption_guid, 0 ) != NULL )
     {
-        dialog_Fatal( p_demux, _("Could not demux ASF stream"), "%s",
-                        _("DRM protected streams are not supported.") );
+        vlc_dialog_display_error( p_demux, _("Could not demux ASF stream"), "%s",
+            ("DRM protected streams are not supported.") );
         goto error;
     }
 
@@ -844,6 +845,7 @@ static int DemuxInit( demux_t *p_demux )
         tk->p_es = NULL;
         tk->info.p_esp = NULL;
         tk->info.p_frame = NULL;
+        tk->info.i_cat = UNKNOWN_ES;
         tk->queue.p_first = NULL;
         tk->queue.pp_last = &tk->queue.p_first;
 
@@ -932,6 +934,8 @@ static int DemuxInit( demux_t *p_demux )
                                                      UINT_MAX, uint32_t );
             GET_CHECKED( fmt.video.i_height,     GetDWLE( p_data + 8 ),
                                                      UINT_MAX, uint32_t );
+            fmt.video.i_visible_width = fmt.video.i_width;
+            fmt.video.i_visible_height = fmt.video.i_height;
 
             if( p_esp && p_esp->i_average_time_per_frame > 0 )
             {
@@ -944,7 +948,7 @@ static int DemuxInit( demux_t *p_demux )
             if( fmt.i_codec == VLC_FOURCC( 'D','V','R',' ') )
             {
                 /* DVR-MS special ASF */
-                fmt.i_codec = VLC_FOURCC( 'm','p','g','2' ) ;
+                fmt.i_codec = VLC_CODEC_MPGV;
                 fmt.b_packetized = false;
             }
 
@@ -1054,7 +1058,7 @@ static int DemuxInit( demux_t *p_demux )
             es_format_Init( &fmt, UNKNOWN_ES, 0 );
         }
 
-        tk->i_cat = fmt.i_cat;
+        tk->i_cat = tk->info.i_cat = fmt.i_cat;
         if( fmt.i_cat != UNKNOWN_ES )
         {
             if( p_esp && p_languages &&

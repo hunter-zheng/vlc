@@ -68,7 +68,7 @@ cmake: cmake-$(CMAKE_VERSION).tar.gz
 	$(MOVE)
 
 .cmake: cmake
-	(cd $<; ./configure --prefix=$(PREFIX) && $(MAKE) && $(MAKE) install)
+	(cd $<; ./configure --prefix=$(PREFIX) $(CMAKEFLAGS) && $(MAKE) && $(MAKE) install)
 	touch $@
 
 CLEAN_FILE += .cmake
@@ -82,6 +82,7 @@ libtool-$(LIBTOOL_VERSION).tar.gz:
 
 libtool: libtool-$(LIBTOOL_VERSION).tar.gz
 	$(UNPACK)
+	$(APPLY) libtool-2.4.2-bitcode.patch
 	$(MOVE)
 
 .libtool: libtool .automake
@@ -121,7 +122,7 @@ xz: xz-$(XZ_VERSION).tar.bz2
 	$(MOVE)
 
 .xz: xz
-	(cd $<; ./configure --prefix=$(PREFIX) && $(MAKE) && $(MAKE) install)
+	(cd $<; ./configure --prefix=$(PREFIX) && $(MAKE) && $(MAKE) install && rm $(PREFIX)/lib/pkgconfig/liblzma.pc)
 	touch $@
 
 CLEAN_PKG += xz
@@ -297,3 +298,5 @@ distclean: clean
 	rm -fr $(DISTCLEAN_PKG)
 
 .PHONY: all clean distclean
+
+.DELETE_ON_ERROR:

@@ -1,7 +1,7 @@
 /*****************************************************************************
  * libvlc_media_player.h:  libvlc_media_player external API
  *****************************************************************************
- * Copyright (C) 1998-2010 VLC authors and VideoLAN
+ * Copyright (C) 1998-2015 VLC authors and VideoLAN
  * $Id$
  *
  * Authors: Clément Stenac <zorglub@videolan.org>
@@ -23,11 +23,6 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-/**
- * \file
- * This file defines libvlc_media_player external API
- */
-
 #ifndef VLC_LIBVLC_MEDIA_PLAYER_H
 #define VLC_LIBVLC_MEDIA_PLAYER_H 1
 
@@ -37,13 +32,12 @@ extern "C" {
 #  include <stdbool.h>
 # endif
 
-/*****************************************************************************
- * Media Player
- *****************************************************************************/
 /** \defgroup libvlc_media_player LibVLC media player
  * \ingroup libvlc
  * A LibVLC media player plays one media (usually in a custom drawable).
  * @{
+ * \file
+ * LibVLC simple media player external API
  */
 
 typedef struct libvlc_media_player_t libvlc_media_player_t;
@@ -59,6 +53,32 @@ typedef struct libvlc_track_description_t
     struct libvlc_track_description_t *p_next;
 
 } libvlc_track_description_t;
+
+/**
+ * Description for titles
+ */
+enum
+{
+    libvlc_title_menu          = 0x01,
+    libvlc_title_interactive   = 0x02
+};
+
+typedef struct libvlc_title_description_t
+{
+    int64_t i_duration; /**< duration in milliseconds */
+    char *psz_name; /**< title name */
+    unsigned i_flags; /**< info if item was recognized as a menu, interactive or plain content by the demuxer */
+} libvlc_title_description_t;
+
+/**
+ * Description for chapters
+ */
+typedef struct libvlc_chapter_description_t
+{
+    int64_t i_time_offset; /**< time-offset of the chapter in milliseconds */
+    int64_t i_duration; /**< duration of the chapter in milliseconds */
+    char *psz_name; /**< chapter name */
+} libvlc_chapter_description_t;
 
 /**
  * Description for audio output. It contains
@@ -400,7 +420,7 @@ void libvlc_video_set_format_callbacks( libvlc_media_player_t *mp,
  * The drawable is an NSObject that follow the VLCOpenGLVideoViewEmbedding
  * protocol:
  *
- * @begincode
+ * @code{.m}
  * \@protocol VLCOpenGLVideoViewEmbedding <NSObject>
  * - (void)addVoutSubview:(NSView *)view;
  * - (void)removeVoutSubview:(NSView *)view;
@@ -409,9 +429,9 @@ void libvlc_video_set_format_callbacks( libvlc_media_player_t *mp,
  *
  * Or it can be an NSView object.
  *
- * If you want to use it along with Qt4 see the QMacCocoaViewContainer. Then
+ * If you want to use it along with Qt see the QMacCocoaViewContainer. Then
  * the following code should work:
- * @begincode
+ * @code{.mm}
  * {
  *     NSView *video = [[NSView alloc] init];
  *     QMacCocoaViewContainer *container = new QMacCocoaViewContainer(video, parent);
@@ -437,36 +457,59 @@ LIBVLC_API void libvlc_media_player_set_nsobject ( libvlc_media_player_t *p_mi, 
 LIBVLC_API void * libvlc_media_player_get_nsobject ( libvlc_media_player_t *p_mi );
 
 /**
- * Set the agl handler where the media player should render its video output.
- *
- * \param p_mi the Media Player
- * \param drawable the agl handler
+ * \deprecated Use libvlc_media_player_set_nsobject instead
  */
+LIBVLC_DEPRECATED
 LIBVLC_API void libvlc_media_player_set_agl ( libvlc_media_player_t *p_mi, uint32_t drawable );
 
 /**
- * Get the agl handler previously set with libvlc_media_player_set_agl().
- *
- * \param p_mi the Media Player
- * \return the agl handler or 0 if none where set
+ * \deprecated Use libvlc_media_player_get_nsobject instead
  */
+LIBVLC_DEPRECATED
 LIBVLC_API uint32_t libvlc_media_player_get_agl ( libvlc_media_player_t *p_mi );
 
 /**
  * Set an X Window System drawable where the media player should render its
- * video output. If LibVLC was built without X11 output support, then this has
- * no effects.
+ * video output. The call takes effect when the playback starts. If it is
+ * already started, it might need to be stopped before changes apply.
+ * If LibVLC was built without X11 output support, then this function has no
+ * effects.
  *
+ * By default, LibVLC will capture input events on the video rendering area.
+ * Use libvlc_video_set_mouse_input() and libvlc_video_set_key_input() to
+ * disable that and deliver events to the parent window / to the application
+ * instead. By design, the X11 protocol delivers input events to only one
+ * recipient.
+ *
+ * \warning
+ * The application must call the XInitThreads() function from Xlib before
+ * libvlc_new(), and before any call to XOpenDisplay() directly or via any
+ * other library. Failure to call XInitThreads() will seriously impede LibVLC
+ * performance. Calling XOpenDisplay() before XInitThreads() will eventually
+ * crash the process. That is a limitation of Xlib.
+ *
+ * \param p_mi media player
+ * \param drawable X11 window ID
+ *
+ * \note
  * The specified identifier must correspond to an existing Input/Output class
- * X11 window. Pixmaps are <b>not</b> supported. The caller shall ensure that
- * the X11 server is the same as the one the VLC instance has been configured
- * with. This function must be called before video playback is started;
- * otherwise it will only take effect after playback stop and restart.
+ * X11 window. Pixmaps are <b>not</b> currently supported. The default X11
+ * server is assumed, i.e. that specified in the DISPLAY environment variable.
  *
- * \param p_mi the Media Player
- * \param drawable the ID of the X window
+ * \warning
+ * LibVLC can deal with invalid X11 handle errors, however some display drivers
+ * (EGL, GLX, VA and/or VDPAU) can unfortunately not. Thus the window handle
+ * must remain valid until playback is stopped, otherwise the process may
+ * abort or crash.
+ *
+ * \bug
+ * No more than one window handle per media player instance can be specified.
+ * If the media has multiple simultaneously active video tracks, extra tracks
+ * will be rendered into external windows beyond the control of the
+ * application.
  */
-LIBVLC_API void libvlc_media_player_set_xwindow ( libvlc_media_player_t *p_mi, uint32_t drawable );
+LIBVLC_API void libvlc_media_player_set_xwindow(libvlc_media_player_t *p_mi,
+                                                uint32_t drawable);
 
 /**
  * Get the X Window System window identifier previously set with
@@ -498,6 +541,32 @@ LIBVLC_API void libvlc_media_player_set_hwnd ( libvlc_media_player_t *p_mi, void
  * \return a window handle or NULL if there are none.
  */
 LIBVLC_API void *libvlc_media_player_get_hwnd ( libvlc_media_player_t *p_mi );
+
+/**
+ * Set the android context.
+ *
+ * \version LibVLC 3.0.0 and later.
+ *
+ * \param p_mi the media player
+ * \param p_awindow_handler org.videolan.libvlc.IAWindowNativeHandler jobject
+ *        implemented by the org.videolan.libvlc.MediaPlayer class from the
+ *        libvlc-android project.
+ */
+LIBVLC_API void libvlc_media_player_set_android_context( libvlc_media_player_t *p_mi,
+                                                         void *p_awindow_handler );
+
+/**
+ * Set the EFL Evas Object.
+ *
+ * \version LibVLC 3.0.0 and later.
+ *
+ * \param p_mi the media player
+ * \param p_evas_object a valid EFL Evas Object (Evas_Object)
+ * \return -1 if an error was detected, 0 otherwise.
+ */
+LIBVLC_API int libvlc_media_player_set_evas_object( libvlc_media_player_t *p_mi,
+                                                    void *p_evas_object );
+
 
 /**
  * Callback prototype for audio playback.
@@ -794,9 +863,16 @@ LIBVLC_API libvlc_state_t libvlc_media_player_get_state( libvlc_media_player_t *
 /**
  * Get movie fps rate
  *
+ * This function is provided for backward compatibility. It cannot deal with
+ * multiple video tracks. In LibVLC versions prior to 3.0, it would also fail
+ * if the file format did not convey the frame rate explicitly.
+ *
+ * \deprecated Consider using libvlc_media_tracks_get() instead.
+ *
  * \param p_mi the Media Player
  * \return frames per second (fps) for this playing movie, or 0 if unspecified
  */
+LIBVLC_DEPRECATED
 LIBVLC_API float libvlc_media_player_get_fps( libvlc_media_player_t *p_mi );
 
 /** end bug */
@@ -1072,7 +1148,8 @@ LIBVLC_API int libvlc_video_get_spu_count( libvlc_media_player_t *p_mi );
  * Get the description of available video subtitles.
  *
  * \param p_mi the media player
- * \return list containing description of available video subtitles
+ * \return list containing description of available video subtitles.
+ * It must be freed with libvlc_track_description_list_release()
  */
 LIBVLC_API libvlc_track_description_t *
         libvlc_video_get_spu_description( libvlc_media_player_t *p_mi );
@@ -1123,19 +1200,77 @@ LIBVLC_API int libvlc_video_set_spu_delay( libvlc_media_player_t *p_mi, int64_t 
  * Get the description of available titles.
  *
  * \param p_mi the media player
- * \return list containing description of available titles
+ * \return list containing description of available titles.
+ * It must be freed with libvlc_track_description_list_release()
  */
-LIBVLC_API libvlc_track_description_t *
+LIBVLC_DEPRECATED LIBVLC_API libvlc_track_description_t *
         libvlc_video_get_title_description( libvlc_media_player_t *p_mi );
+
+/**
+ * Get the full description of available titles
+ *
+ * \version LibVLC 3.0.0 and later.
+ *
+ * \param p_mi the media player
+ * \param titles address to store an allocated array of title descriptions
+ *        descriptions (must be freed with libvlc_title_descriptions_release()
+ *        by the caller) [OUT]
+ *
+ * \return the number of titles (-1 on error)
+ */
+LIBVLC_API int libvlc_media_player_get_full_title_descriptions( libvlc_media_player_t *p_mi,
+                                                                libvlc_title_description_t ***titles );
+
+/**
+ * Release a title description
+ *
+ * \version LibVLC 3.0.0 and later
+ *
+ * \param p_titles title description array to release
+ * \param i_count number of title descriptions to release
+ */
+LIBVLC_API
+    void libvlc_title_descriptions_release( libvlc_title_description_t **p_titles,
+                                            unsigned i_count );
+
+/**
+ * Get the full description of available chapters
+ *
+ * \version LibVLC 3.0.0 and later.
+ *
+ * \param p_mi the media player
+ * \param i_chapters_of_title index of the title to query for chapters (uses current title if set to -1)
+ * \param pp_chapters address to store an allocated array of chapter descriptions
+ *        descriptions (must be freed with libvlc_chapter_descriptions_release()
+ *        by the caller) [OUT]
+ *
+ * \return the number of chapters (-1 on error)
+ */
+LIBVLC_API int libvlc_media_player_get_full_chapter_descriptions( libvlc_media_player_t *p_mi,
+                                                                  int i_chapters_of_title,
+                                                                  libvlc_chapter_description_t *** pp_chapters );
+
+/**
+ * Release a chapter description
+ *
+ * \version LibVLC 3.0.0 and later
+ *
+ * \param p_chapters chapter description array to release
+ * \param i_count number of chapter descriptions to release
+ */
+LIBVLC_API
+void libvlc_chapter_descriptions_release( libvlc_chapter_description_t **p_chapters,
+                                          unsigned i_count );
 
 /**
  * Get the description of available chapters for specific title.
  *
  * \param p_mi the media player
  * \param i_title selected title
- * \return list containing description of available chapter for title i_title
+ * \return list containing description of available chapter for title i_title.
+ * It must be freed with libvlc_track_description_list_release()
  */
-LIBVLC_API libvlc_track_description_t *
+LIBVLC_DEPRECATED LIBVLC_API libvlc_track_description_t *
         libvlc_video_get_chapter_description( libvlc_media_player_t *p_mi, int i_title );
 
 /**
@@ -1190,7 +1325,8 @@ LIBVLC_API int libvlc_video_get_track_count( libvlc_media_player_t *p_mi );
  * Get the description of available video tracks.
  *
  * \param p_mi media player
- * \return list with description of available video tracks, or NULL on error
+ * \return list with description of available video tracks, or NULL on error.
+ * It must be freed with libvlc_track_description_list_release()
  */
 LIBVLC_API libvlc_track_description_t *
         libvlc_video_get_track_description( libvlc_media_player_t *p_mi );
@@ -1421,7 +1557,7 @@ typedef enum libvlc_audio_output_channel_t {
  * Gets the list of available audio output modules.
  *
  * \param p_instance libvlc instance
- * \return list of available audio outputs. It must be freed it with
+ * \return list of available audio outputs. It must be freed with
 *          \see libvlc_audio_output_list_release \see libvlc_audio_output_t .
  *         In case of error, NULL is returned.
  */
@@ -1489,7 +1625,7 @@ char *libvlc_audio_output_device_id( libvlc_instance_t *, const char *, int );
  *
  * \param mp media player
  * \return A NULL-terminated linked list of potential audio output devices.
- * It must be freed it with libvlc_audio_output_device_list_release()
+ * It must be freed with libvlc_audio_output_device_list_release()
  * \version LibVLC 2.2.0 or later.
  */
 LIBVLC_API libvlc_audio_output_device_t *
@@ -1510,10 +1646,10 @@ libvlc_audio_output_device_enum( libvlc_media_player_t *mp );
  * explicit audio device.
  *
  * \param p_instance libvlc instance
- * \param psz_aout audio output name
+ * \param aout audio output name
  *                 (as returned by libvlc_audio_output_list_get())
  * \return A NULL-terminated linked list of potential audio output devices.
- * It must be freed it with libvlc_audio_output_device_list_release()
+ * It must be freed with libvlc_audio_output_device_list_release()
  * \version LibVLC 2.1.0 or later.
  */
 LIBVLC_API libvlc_audio_output_device_t *
@@ -1672,7 +1808,8 @@ LIBVLC_API int libvlc_audio_get_track_count( libvlc_media_player_t *p_mi );
  * Get the description of available audio tracks.
  *
  * \param p_mi media player
- * \return list with description of available audio tracks, or NULL
+ * \return list with description of available audio tracks, or NULL.
+ * It must be freed with libvlc_track_description_list_release()
  */
 LIBVLC_API libvlc_track_description_t *
         libvlc_audio_get_track_description( libvlc_media_player_t *p_mi );

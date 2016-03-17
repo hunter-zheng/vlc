@@ -98,8 +98,20 @@ static int AVI_NextChunk( stream_t *s, avi_chunk_t *p_chk )
             return VLC_EGENERIC;
         }
     }
-    return stream_Seek( s, p_chk->common.i_chunk_pos +
-                                 __EVEN( p_chk->common.i_chunk_size ) + 8 );
+
+    bool b_seekable = false;
+    uint64_t i_offset = p_chk->common.i_chunk_pos +
+                        __EVEN( p_chk->common.i_chunk_size ) + 8;
+    if ( !stream_Control(s, STREAM_CAN_SEEK, &b_seekable) && b_seekable )
+    {
+        return stream_Seek( s, i_offset );
+    }
+    else
+    {
+        ssize_t i_read = i_offset - stream_Tell( s );
+        return (i_read >=0 && stream_Read( s, NULL, i_read ) == i_read) ?
+                    VLC_SUCCESS : VLC_EGENERIC;
+    }
 }
 
 /****************************************************************************
@@ -126,7 +138,7 @@ static int AVI_ChunkRead_list( stream_t *s, avi_chunk_t *p_container )
         return VLC_EGENERIC;
     }
 
-    stream_Control( s, STREAM_CAN_FASTSEEK, &b_seekable );
+    stream_Control( s, STREAM_CAN_SEEK, &b_seekable );
 
     p_container->list.i_type = GetFOURCC( p_peek + 8 );
 
@@ -140,11 +152,10 @@ static int AVI_ChunkRead_list( stream_t *s, avi_chunk_t *p_container )
     if( p_container->common.i_chunk_fourcc == AVIFOURCC_LIST &&
         p_container->list.i_type == AVIFOURCC_movi )
     {
+        if( !b_seekable )
+            return VLC_SUCCESS;
         msg_Dbg( (vlc_object_t*)s, "skipping movi chunk" );
-        if( b_seekable )
-            return AVI_NextChunk( s, p_container );
-        else
-            return VLC_EGENERIC; /* point at begining of LIST-movi */
+        return AVI_NextChunk( s, p_container ); /* points at begining of LIST-movi if not seekable */
     }
 
     if( stream_Read( s, NULL, 12 ) != 12 )
@@ -652,7 +663,7 @@ static int AVI_ChunkRead_indx( stream_t *s, avi_chunk_t *p_chk )
     }
     else
     {
-        msg_Warn( (vlc_object_t*)s, "unknow type/subtype index" );
+        msg_Warn( (vlc_object_t*)s, "unknown type/subtype index" );
     }
 
 #ifdef AVI_DEBUG
@@ -1051,7 +1062,7 @@ int AVI_ChunkReadRoot( stream_t *s, avi_chunk_t *p_root )
     avi_chunk_t      *p_chk;
     bool b_seekable;
 
-    stream_Control( s, STREAM_CAN_FASTSEEK, &b_seekable );
+    stream_Control( s, STREAM_CAN_SEEK, &b_seekable );
 
     p_list->i_chunk_pos  = 0;
     p_list->i_chunk_size = stream_Size( s );
@@ -1103,7 +1114,7 @@ void AVI_ChunkFreeRoot( stream_t *s,
 }
 
 
-int  _AVI_ChunkCount( avi_chunk_t *p_chk, vlc_fourcc_t i_fourcc )
+int  AVI_ChunkCount_( avi_chunk_t *p_chk, vlc_fourcc_t i_fourcc )
 {
     int i_count;
     avi_chunk_t *p_child;
@@ -1128,7 +1139,7 @@ int  _AVI_ChunkCount( avi_chunk_t *p_chk, vlc_fourcc_t i_fourcc )
     return i_count;
 }
 
-void *_AVI_ChunkFind( avi_chunk_t *p_chk,
+void *AVI_ChunkFind_( avi_chunk_t *p_chk,
                       vlc_fourcc_t i_fourcc, int i_number )
 {
     avi_chunk_t *p_child;

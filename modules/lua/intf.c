@@ -90,7 +90,7 @@ static char *MakeConfig( intf_thread_t *p_intf, const char *name )
         else
         {
             vlc_url_t url;
-            vlc_UrlParse( &url, psz_host, 0 );
+            vlc_UrlParse( &url, psz_host );
             unsigned i_port = var_InheritInteger( p_intf, "telnet-port" );
             if ( url.i_port != 0 )
             {
@@ -245,7 +245,7 @@ static int Start_LuaIntf( vlc_object_t *p_this, const char *name )
     luaL_openlibs( L );
 
     /* register our functions */
-    luaL_register( L, "vlc", p_reg );
+    luaL_register_namespace( L, "vlc", p_reg );
 
     /* register submodules */
     luaopen_config( L );
@@ -390,8 +390,8 @@ void Close_LuaIntf( vlc_object_t *p_this )
     vlclua_fd_interrupt( &p_sys->dtable );
     vlc_join( p_sys->thread, NULL );
 
-    vlclua_fd_cleanup( &p_sys->dtable );
     lua_close( p_sys->L );
+    vlclua_fd_cleanup( &p_sys->dtable );
     free( p_sys->psz_filename );
     free( p_sys );
 }

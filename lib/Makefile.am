@@ -11,6 +11,7 @@ CLEANFILES = $(BUILT_SOURCES) $(pkgconfig_DATA)
 pkginclude_HEADERS = \
 	../include/vlc/deprecated.h \
 	../include/vlc/libvlc.h \
+	../include/vlc/libvlc_dialog.h \
 	../include/vlc/libvlc_events.h \
 	../include/vlc/libvlc_media.h \
 	../include/vlc/libvlc_media_discoverer.h \
@@ -32,11 +33,11 @@ lib_LTLIBRARIES = libvlc.la
 
 libvlc_la_SOURCES = \
 	libvlc_internal.h \
-	event_internal.h \
 	media_internal.h \
 	media_list_internal.h \
 	media_player_internal.h \
 	core.c \
+	dialog.c \
 	error.c \
 	log.c \
 	playlist.c \
@@ -44,7 +45,6 @@ libvlc_la_SOURCES = \
 	video.c \
 	audio.c \
 	event.c \
-	event_async.c \
 	media.c \
 	media_player.c \
 	media_list.c \

@@ -330,6 +330,9 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
     switch( i_query )
     {
+        case DEMUX_CAN_SEEK:
+            return stream_vaControl( p_demux->s, i_query, args );
+
         case DEMUX_GET_POSITION:
             pf = (double*) va_arg( args, double* );
             i64 = stream_Size( p_demux->s );
@@ -503,6 +506,8 @@ static int ReadNSVs( demux_t *p_demux )
         es_format_Init( &p_sys->fmt_video, VIDEO_ES, fcc );
         p_sys->fmt_video.video.i_width = GetWLE( &header[12] );
         p_sys->fmt_video.video.i_height = GetWLE( &header[14] );
+        p_sys->fmt_video.video.i_visible_width = p_sys->fmt_video.video.i_width;
+        p_sys->fmt_video.video.i_visible_height = p_sys->fmt_video.video.i_height;
         if( p_sys->p_video )
         {
             es_out_Del( p_demux->out, p_sys->p_video );

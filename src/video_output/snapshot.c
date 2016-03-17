@@ -29,7 +29,6 @@
 #include <assert.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/time.h>
 #include <dirent.h>
 #include <time.h>
 
@@ -78,15 +77,16 @@ void vout_snapshot_End(vout_snapshot_t *snap)
 /* */
 picture_t *vout_snapshot_Get(vout_snapshot_t *snap, mtime_t timeout)
 {
+    const mtime_t deadline = mdate() + timeout;
+
     vlc_mutex_lock(&snap->lock);
 
     /* */
     snap->request_count++;
 
     /* */
-    const mtime_t deadline = mdate() + timeout;
-    while (snap->is_available && !snap->picture && mdate() < deadline)
-        vlc_cond_timedwait(&snap->wait, &snap->lock, deadline);
+    while (snap->is_available && !snap->picture &&
+        vlc_cond_timedwait(&snap->wait, &snap->lock, deadline) == 0);
 
     /* */
     picture_t *picture = snap->picture;
@@ -179,20 +179,20 @@ int vout_snapshot_SaveImage(char **name, int *sequential,
                 free(filename);
             }
         } else {
-            struct timeval tv;
+            struct timespec ts;
             struct tm curtime;
             char buffer[128];
 
-            gettimeofday(&tv, NULL);
-            if (localtime_r(&tv.tv_sec, &curtime) == NULL)
-                gmtime_r(&tv.tv_sec, &curtime);
+            timespec_get(&ts, TIME_UTC);
+            if (localtime_r(&ts.tv_sec, &curtime) == NULL)
+                gmtime_r(&ts.tv_sec, &curtime);
             if (strftime(buffer, sizeof(buffer), "%Y-%m-%d-%Hh%Mm%Ss",
                          &curtime) == 0)
                 strcpy(buffer, "error");
 
-            if (asprintf(&filename, "%s" DIR_SEP "%s%s%03u.%s",
-                         cfg->path, prefix, buffer,
-                         (unsigned)tv.tv_usec / 1000, cfg->format) < 0)
+            if (asprintf(&filename, "%s" DIR_SEP "%s%s%03lu.%s",
+                         cfg->path, prefix, buffer, ts.tv_nsec / 1000000,
+                         cfg->format) < 0)
                 filename = NULL;
         }
         free(prefix);

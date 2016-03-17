@@ -36,10 +36,41 @@
  * states, since we can't capture the mouse-moved events here correctly
  *****************************************************************************/
 
+@interface VLCMainWindowTitleView()
+{
+    NSImage * o_red_img;
+    NSImage * o_red_over_img;
+    NSImage * o_red_on_img;
+    NSImage * o_yellow_img;
+    NSImage * o_yellow_over_img;
+    NSImage * o_yellow_on_img;
+    NSImage * o_green_img;
+    NSImage * o_green_over_img;
+    NSImage * o_green_on_img;
+    // yosemite fullscreen images
+    NSImage * o_fullscreen_img;
+    NSImage * o_fullscreen_over_img;
+    NSImage * o_fullscreen_on_img;
+    // old native fullscreen images
+    NSImage * o_old_fullscreen_img;
+    NSImage * o_old_fullscreen_over_img;
+    NSImage * o_old_fullscreen_on_img;
+
+    NSShadow * o_window_title_shadow;
+    NSDictionary * o_window_title_attributes_dict;
+
+    BOOL b_nativeFullscreenMode;
+
+    // state to determine correct image for green bubble
+    BOOL b_alt_pressed;
+    BOOL b_mouse_over;
+}
+@end
+
 @implementation VLCMainWindowTitleView
 - (id)init
 {
-    o_window_title_attributes_dict = [[NSDictionary dictionaryWithObjectsAndKeys: [NSColor whiteColor], NSForegroundColorAttributeName, [NSFont titleBarFontOfSize:12.0], NSFontAttributeName, nil] retain];
+    o_window_title_attributes_dict = [NSDictionary dictionaryWithObjectsAndKeys: [NSColor whiteColor], NSForegroundColorAttributeName, [NSFont titleBarFontOfSize:12.0], NSFontAttributeName, nil];
 
     return [super init];
 }
@@ -47,38 +78,13 @@
 - (void)dealloc
 {
     [[NSNotificationCenter defaultCenter] removeObserver: self];
-
-    [o_red_img release];
-    [o_red_over_img release];
-    [o_red_on_img release];
-    [o_yellow_img release];
-    [o_yellow_over_img release];
-    [o_yellow_on_img release];
-    [o_green_img release];
-    [o_green_over_img release];
-    [o_green_on_img release];
-    [o_fullscreen_img release];
-    [o_fullscreen_over_img release];
-    [o_fullscreen_on_img release];
-    [o_old_fullscreen_img release];
-    [o_old_fullscreen_over_img release];
-    [o_old_fullscreen_on_img release];
-
-    [o_window_title_shadow release];
-    [o_window_title_attributes_dict release];
-
-    [super dealloc];
 }
 
 - (void)awakeFromNib
 {
-    b_nativeFullscreenMode = NO;
-#ifdef MAC_OS_X_VERSION_10_7
-    if (!OSX_SNOW_LEOPARD)
-        b_nativeFullscreenMode = var_InheritBool(VLCIntf, "macosx-nativefullscreenmode");
-#endif
+    b_nativeFullscreenMode = var_InheritBool(getIntf(), "macosx-nativefullscreenmode");
 
-    if (!b_nativeFullscreenMode || OSX_YOSEMITE) {
+    if (!b_nativeFullscreenMode || OSX_YOSEMITE || OSX_EL_CAPITAN) {
         [o_fullscreen_btn setHidden: YES];
     }
 
@@ -112,9 +118,7 @@
 - (NSImage *)getButtonImage:(NSString *)o_id
 {
     NSString *o_name = @"";
-    if (OSX_SNOW_LEOPARD) {
-        o_name = @"snowleo-";
-    } else if (OSX_YOSEMITE) {
+    if (OSX_YOSEMITE || OSX_EL_CAPITAN) {
         o_name = @"yosemite-";
     } else { // OSX_LION, OSX_MOUNTAIN_LION, OSX_MAVERICKS
         o_name = @"lion-";
@@ -131,44 +135,28 @@
 
 - (void)loadButtonIcons
 {
-    [o_red_img release];
-    [o_red_over_img release];
-    [o_red_on_img release];
-    [o_yellow_img release];
-    [o_yellow_over_img release];
-    [o_yellow_on_img release];
-    [o_green_img release];
-    [o_green_over_img release];
-    [o_green_on_img release];
-    [o_fullscreen_img release];
-    [o_fullscreen_over_img release];
-    [o_fullscreen_on_img release];
-    [o_old_fullscreen_img release];
-    [o_old_fullscreen_over_img release];
-    [o_old_fullscreen_on_img release];
-
-    o_red_img = [[self getButtonImage:@"window-close"] retain];
-    o_red_over_img = [[self getButtonImage:@"window-close-over"] retain];
-    o_red_on_img = [[self getButtonImage:@"window-close-on"] retain];
-    o_yellow_img = [[self getButtonImage:@"window-minimize"] retain];
-    o_yellow_over_img = [[self getButtonImage:@"window-minimize-over"] retain];
-    o_yellow_on_img = [[self getButtonImage:@"window-minimize-on"] retain];
-    o_green_img = [[self getButtonImage:@"window-zoom"] retain];
-    o_green_over_img = [[self getButtonImage:@"window-zoom-over"] retain];
-    o_green_on_img = [[self getButtonImage:@"window-zoom-on"] retain];
+    o_red_img = [self getButtonImage:@"window-close"];
+    o_red_over_img = [self getButtonImage:@"window-close-over"];
+    o_red_on_img = [self getButtonImage:@"window-close-on"];
+    o_yellow_img = [self getButtonImage:@"window-minimize"];
+    o_yellow_over_img = [self getButtonImage:@"window-minimize-over"];
+    o_yellow_on_img = [self getButtonImage:@"window-minimize-on"];
+    o_green_img = [self getButtonImage:@"window-zoom"];
+    o_green_over_img = [self getButtonImage:@"window-zoom-over"];
+    o_green_on_img = [self getButtonImage:@"window-zoom-on"];
 
     // these files are only available in the yosemite variant
-    if (OSX_YOSEMITE) {
-        o_fullscreen_img = [[self getButtonImage:@"window-fullscreen"] retain];
-        o_fullscreen_over_img = [[self getButtonImage:@"window-fullscreen-over"] retain];
-        o_fullscreen_on_img = [[self getButtonImage:@"window-fullscreen-on"] retain];
+    if (OSX_YOSEMITE || OSX_EL_CAPITAN) {
+        o_fullscreen_img = [self getButtonImage:@"window-fullscreen"];
+        o_fullscreen_over_img = [self getButtonImage:@"window-fullscreen-over"];
+        o_fullscreen_on_img = [self getButtonImage:@"window-fullscreen-on"];
     }
 
     // old native fullscreen images are not available in graphite style
     // thus they are loaded directly here
-    o_old_fullscreen_img = [[NSImage imageNamed:@"lion-window-fullscreen"] retain];
-    o_old_fullscreen_on_img = [[NSImage imageNamed:@"lion-window-fullscreen-on"] retain];
-    o_old_fullscreen_over_img = [[NSImage imageNamed:@"lion-window-fullscreen-over"] retain];
+    o_old_fullscreen_img = [NSImage imageNamed:@"lion-window-fullscreen"];
+    o_old_fullscreen_on_img = [NSImage imageNamed:@"lion-window-fullscreen-on"];
+    o_old_fullscreen_over_img = [NSImage imageNamed:@"lion-window-fullscreen-over"];
 
     [o_red_btn setImage: o_red_img];
     [o_red_btn setAlternateImage: o_red_on_img];
@@ -193,7 +181,7 @@
 {
     // default image for old version, or if native fullscreen is
     // disabled on yosemite, or if alt key is pressed
-    if (!OSX_YOSEMITE || !b_nativeFullscreenMode || b_alt_pressed) {
+    if (!(OSX_YOSEMITE || OSX_EL_CAPITAN) || !b_nativeFullscreenMode || b_alt_pressed) {
 
         if (b_mouse_over) {
             [o_green_btn setImage: o_green_over_img];
@@ -226,7 +214,7 @@
     else if (sender == o_yellow_btn)
         [[self window] miniaturize: sender];
     else if (sender == o_green_btn) {
-        if (OSX_YOSEMITE && b_nativeFullscreenMode && !b_alt_pressed) {
+        if ((OSX_YOSEMITE || OSX_EL_CAPITAN) && b_nativeFullscreenMode && !b_alt_pressed) {
             [[self window] toggleFullScreen:self];
         } else {
             [[self window] performZoom: sender];
@@ -236,7 +224,7 @@
         [[self window] toggleFullScreen:self];
 
     } else
-        msg_Err(VLCIntf, "unknown button action sender");
+        msg_Err(getIntf(), "unknown button action sender");
 
     [self setWindowButtonOver: NO];
     [self setWindowFullscreenButtonOver: NO];
@@ -249,7 +237,6 @@
         [o_window_title_shadow setShadowColor:[NSColor colorWithCalibratedWhite:1.0 alpha:0.5]];
         [o_window_title_shadow setShadowOffset:NSMakeSize(0.0, -1.5)];
         [o_window_title_shadow setShadowBlurRadius:0.5];
-        [o_window_title_shadow retain];
     }
 
     NSMutableAttributedString *o_attributed_title = [[NSMutableAttributedString alloc] initWithString:title attributes: o_window_title_attributes_dict];
@@ -258,7 +245,6 @@
     [o_attributed_title addAttribute:NSShadowAttributeName value:o_window_title_shadow range:NSMakeRange(0, i_titleLength)];
     [o_attributed_title setAlignment: NSCenterTextAlignment range:NSMakeRange(0, i_titleLength)];
     [o_title_lbl setAttributedStringValue:o_attributed_title];
-    [o_attributed_title release];
 }
 
 - (void)setWindowButtonOver:(BOOL)b_value
@@ -512,21 +498,16 @@
 @end
 
 
-@implementation VLCWindowTitleTextField
-
-- (void)dealloc
+@interface VLCWindowTitleTextField()
 {
-    if (contextMenu)
-        [contextMenu release];
-
-    [super dealloc];
+    NSMenu *_contextMenu;
 }
+@end
+
+@implementation VLCWindowTitleTextField
 
 - (void)showRightClickMenuWithEvent:(NSEvent *)o_event
 {
-    if (contextMenu)
-        [contextMenu release];
-
     NSURL * representedURL = [[self window] representedURL];
     if (!representedURL)
         return;
@@ -537,7 +518,7 @@
     if (!pathComponents)
         return;
 
-    contextMenu = [[NSMenu alloc] initWithTitle: [[NSFileManager defaultManager] displayNameAtPath: [representedURL path]]];
+    _contextMenu = [[NSMenu alloc] initWithTitle: [[NSFileManager defaultManager] displayNameAtPath: [representedURL path]]];
 
     NSUInteger count = [pathComponents count];
     NSImage * icon;
@@ -549,8 +530,8 @@
         for (NSUInteger y = 0; y < i; y++)
             [currentPath appendFormat: @"/%@", [pathComponents objectAtIndex:y + 1]];
 
-        [contextMenu addItemWithTitle: [[NSFileManager defaultManager] displayNameAtPath: currentPath] action:@selector(revealInFinder:) keyEquivalent:@""];
-        currentItem = [contextMenu itemAtIndex:[contextMenu numberOfItems] - 1];
+        [_contextMenu addItemWithTitle: [[NSFileManager defaultManager] displayNameAtPath: currentPath] action:@selector(revealInFinder:) keyEquivalent:@""];
+        currentItem = [_contextMenu itemAtIndex:[_contextMenu numberOfItems] - 1];
         [currentItem setTarget: self];
 
         icon = [[NSWorkspace sharedWorkspace] iconForFile:currentPath];
@@ -560,13 +541,13 @@
 
     if ([[pathComponents objectAtIndex:1] isEqualToString:@"Volumes"]) {
         /* we don't want to show the Volumes item, since the Cocoa does it neither */
-        currentItem = [contextMenu itemWithTitle:[[NSFileManager defaultManager] displayNameAtPath: @"/Volumes"]];
+        currentItem = [_contextMenu itemWithTitle:[[NSFileManager defaultManager] displayNameAtPath: @"/Volumes"]];
         if (currentItem)
-            [contextMenu removeItem: currentItem];
+            [_contextMenu removeItem: currentItem];
     } else {
         /* we're on the boot drive, so add it since it isn't part of the components */
-        [contextMenu addItemWithTitle: [[NSFileManager defaultManager] displayNameAtPath:@"/"] action:@selector(revealInFinder:) keyEquivalent:@""];
-        currentItem = [contextMenu itemAtIndex: [contextMenu numberOfItems] - 1];
+        [_contextMenu addItemWithTitle: [[NSFileManager defaultManager] displayNameAtPath:@"/"] action:@selector(revealInFinder:) keyEquivalent:@""];
+        currentItem = [_contextMenu itemAtIndex: [_contextMenu numberOfItems] - 1];
         icon = [[NSWorkspace sharedWorkspace] iconForFile:@"/"];
         [icon setSize: iconSize];
         [currentItem setImage: icon];
@@ -574,15 +555,15 @@
     }
 
     /* add the computer item */
-    [contextMenu addItemWithTitle: [(NSString*)SCDynamicStoreCopyComputerName(NULL, NULL) autorelease] action:@selector(revealInFinder:) keyEquivalent:@""];
-    currentItem = [contextMenu itemAtIndex: [contextMenu numberOfItems] - 1];
+    [_contextMenu addItemWithTitle:(NSString*)CFBridgingRelease(SCDynamicStoreCopyComputerName(NULL, NULL)) action:@selector(revealInFinder:) keyEquivalent:@""];
+    currentItem = [_contextMenu itemAtIndex: [_contextMenu numberOfItems] - 1];
     icon = [NSImage imageNamed: NSImageNameComputer];
     [icon setSize: iconSize];
     [currentItem setImage: icon];
     [currentItem setTarget: self];
 
     // center the context menu similar to the white interface
-    CGFloat menuWidth = [contextMenu size].width;
+    CGFloat menuWidth = [_contextMenu size].width;
     NSRect windowFrame = [[self window] frame];
     NSPoint point;
 
@@ -605,13 +586,13 @@
                                               eventNumber:0
                                                clickCount:0
                                                  pressure:0];
-    [NSMenu popUpContextMenu: contextMenu withEvent: fakeMouseEvent forView: [self superview]];
+    [NSMenu popUpContextMenu: _contextMenu withEvent: fakeMouseEvent forView: [self superview]];
 }
 
 - (IBAction)revealInFinder:(id)sender
 {
-    NSUInteger count = [contextMenu numberOfItems];
-    NSUInteger selectedItem = [contextMenu indexOfItem: sender];
+    NSUInteger count = [_contextMenu numberOfItems];
+    NSUInteger selectedItem = [_contextMenu indexOfItem: sender];
 
     if (selectedItem == count - 1) { // the fake computer item
         [[NSWorkspace sharedWorkspace] selectFile: @"/" inFileViewerRootedAtPath: @""];
